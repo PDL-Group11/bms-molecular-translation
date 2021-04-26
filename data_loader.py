@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader
 from PIL import Image
 import pandas as pd
 import os
-#from skimage import io, transform
 
 class Dataset:
 
@@ -48,7 +47,6 @@ class MoleculeDataset(Dataset):
             transform (callable, optional): optional transform on samples
         '''
         super(MoleculeDataset, self).__init__(root, csv)
-        #self.label_frame = pd.read_csv(csv)
         self.root = root
         self.transform = transform
 
