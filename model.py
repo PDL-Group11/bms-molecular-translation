@@ -23,11 +23,11 @@ import torch.utils.checkpoint as checkpoint
 # Used for data normalization --> should be replaced with our dataset mean / std if needed
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from timm.models.vision_transformer import Mlp, PatchEmbed
-
+import timm
+from pprint import pprint
 _logger = logging.getLogger(__name__)
 
-
+# TODO: should be modified with our setting
 def _cfg(url='', **kwargs):
     return {
         'url': url,
@@ -37,6 +37,52 @@ def _cfg(url='', **kwargs):
         'first_conv': 'patch_embed.proj', 'classifier': 'head',
         **kwargs
     }
+
+# TODO: should return model with backbone as SwinTransformer() and classifier together
+def get_model():
+    pass
+
+class Mlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+class PatchEmbed(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.patch_grid = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
+        self.num_patches = self.patch_grid[0] * self.patch_grid[1]
+
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        assert H == self.img_size[0] and W == self.img_size[1], \
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)
+        x = self.norm(x)
+        return x
 
 def _init_vit_weights(m, n: str = '', head_bias: float = 0., jax_impl: bool = False):
     """ ViT weight initialization
@@ -407,7 +453,6 @@ class BasicLayer(nn.Module):
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
-
 class SwinTransformer(nn.Module):
     r""" Swin Transformer
         A PyTorch impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
@@ -523,8 +568,3 @@ class SwinTransformer(nn.Module):
         x = self.forward_features(x)
         x = self.head(x)
         return x
-
-if __name__ == "__main__":
-
-    model = SwinTransformer()
-    print(model)
