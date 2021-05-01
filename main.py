@@ -73,8 +73,8 @@ if __name__ == "__main__":
         batch_test=arg.batch_test,
     )
 
-    #TODO: load model
-    net = get_model(arg)
+    #TODO: get model with backbone (Swin Transformer) and classifier 
+    net = get_model()
     net = nn.DataParallel(net).to(device)
     
     #TODO: add loss criterion
