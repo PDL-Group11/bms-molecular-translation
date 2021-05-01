@@ -182,7 +182,7 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10):
 
     :return:
     """
-    print('inchi:', inchi)
+    #print('inchi:', inchi)
     # replace unique labels to decide with label class to search
     labels = defaultdict(int)
     for k, v in unique_labels.items():
@@ -195,7 +195,7 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10):
         logLevel=None,
         treatWarningAsError=False)
     doc = _get_svg_doc(mol)
-    print('doc.toprettyxml():', doc.toprettyxml())
+    #print('doc.toprettyxml():', doc.toprettyxml())
 
     # Get X and Y from drawing and type is generated
     # from mol Object, concatenating symbol + formal charge
@@ -203,7 +203,7 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10):
                    'y':    int(round(float(path.getAttribute('drawing-y')), 0)),
                    'type': ''.join([a.GetSymbol(), str(a.GetFormalCharge())])} for path, a in
                   zip(doc.getElementsByTagName('rdkit:atom'), mol.GetAtoms())]
-    print('atoms_data:', atoms_data)
+    #print('atoms_data:', atoms_data)
 
     annotations = []
     # annotating bonds
