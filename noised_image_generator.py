@@ -25,6 +25,26 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 from rdkit.Chem.Draw import MolDrawOptions
 
+import time
+import ray
+
+ray.init()
+PROJECT_DIR = Path('.')
+INPUT_DIR = PROJECT_DIR / 'dataset'
+TMP_DIR = PROJECT_DIR / 'tmp'
+TRAIN_DATA_PATH = INPUT_DIR
+TRAIN_LABELS_PATH = INPUT_DIR / 'extra_approved_InChIs.csv'
+TMP_DIR.mkdir(exist_ok=True)
+
+cssutils.log.setLevel(logging.CRITICAL)
+
+np.set_printoptions(edgeitems=30, linewidth=180)
+print('RDKit version:', rdkit.__version__)
+# Use a specific version of RDKit with known characteristics so that we can reliably manipulate output SVG.
+# assert rdkit.__version__ == '2020.03.6'
+
+TRAIN_LABELS = pd.read_csv(TRAIN_LABELS_PATH)
+
 def one_in(n):
     return np.random.randint(n) == 0 and True or False
 
@@ -182,12 +202,13 @@ def image_widget(a, greyscale=True):
     img_pil.save(img_bytes, format='PNG')
     return widgets.Image(value=img_bytes.getvalue())
 
-
-def test_random_molecule_image(n=4, graphics=True):
-    for imol in range(n):
-        # mol_index = np.random.randint(len(TRAIN_LABELS))
-        inchi = TRAIN_LABELS['InChI'][imol]
-        # print(inchi)
+@ray.remote
+def test_random_molecule_image(n, index,labels):
+    now = time.time()
+    a = n * index
+    b = n * (index+1)
+    for imol in range(a,b):
+        inchi = labels['InChI'][imol]
         img, orig_bond_img, orig_atom_img = random_molecule_image(inchi)
         img = Image.fromarray((255*(1 - img)).astype(np.uint8))
         img.save('./dataset/extra_images/'+str(imol)+'.png')
@@ -195,21 +216,8 @@ def test_random_molecule_image(n=4, graphics=True):
 
 if __name__ == '__main__':
 
-    PROJECT_DIR = Path('.')
-    INPUT_DIR = PROJECT_DIR / 'dataset'
-    TMP_DIR = PROJECT_DIR / 'tmp'
-    TRAIN_DATA_PATH = INPUT_DIR
-    TRAIN_LABELS_PATH = INPUT_DIR / 'extra_approved_InChIs.csv'
-    TMP_DIR.mkdir(exist_ok=True)
-
-    cssutils.log.setLevel(logging.CRITICAL)
-
-    np.set_printoptions(edgeitems=30, linewidth=180)
-    print('RDKit version:', rdkit.__version__)
-    # Use a specific version of RDKit with known characteristics so that we can reliably manipulate output SVG.
-    # assert rdkit.__version__ == '2020.03.6'
-
-    TRAIN_LABELS = pd.read_csv(TRAIN_LABELS_PATH)
     print(f'Read {len(TRAIN_LABELS)} training labels.')
-    test_random_molecule_image(n=9998711, graphics=True)
+    labels = ray.put(TRAIN_LABELS)
+    results = [test_random_molecule_image.remote(280000,i,labels) for i in range(36)]
+    results = ray.get(results)
     print('DONE!')
