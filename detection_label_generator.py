@@ -8,7 +8,7 @@ from rdkit.Chem import Draw
 from rdkit import Chem
 from xml.dom import minidom
 from collections import defaultdict
-from pdqm.processes import pdqm
+from pqdm.processes import pqdm
 from scipy.spatial.ckdtree import cKDTree
 ### for test
 from data_loader import MoleculeDataset
@@ -34,6 +34,20 @@ def _get_svg_doc(mol):
 
     doc = minidom.parseString(svg)
     return doc
+
+def _get_svg(mol):
+    """
+    Draws molecule a generates SVG string.
+    :param mol:
+    :return:
+    """
+    dm = Draw.PrepareMolForDrawing(mol)
+    d2d = Draw.MolDraw2DSVG(300, 300)
+    d2d.DrawMolecule(dm)
+    d2d.AddMoleculeMetadata(dm)
+    d2d.FinishDrawing()
+    svg = d2d.GetDrawingText()
+    return svg 
 
 def _get_unique_atom_inchi_and_rarity(inchi):
     '''
@@ -148,7 +162,7 @@ def create_unique_ins_labels(data, overwrite=False, base_path='.'):
 
     n_jobs = multiprocessing.cpu_count() - 1
     # get unique atom-inchi in each compound and count for sampling later
-    result = pdqm(
+    result = pqdm(
         inchi_list, 
         _get_unique_atom_inchi_and_rarity,
         n_jobs=n_jobs,
