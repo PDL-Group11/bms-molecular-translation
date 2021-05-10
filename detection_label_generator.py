@@ -4,21 +4,14 @@ import os
 import pandas as pd
 import json
 import multiprocessing
+import pickle
 from rdkit.Chem import Draw
 from rdkit import Chem
 from xml.dom import minidom
-from collections import defaultdict
+from collections import defaultdict, Counter
 from pqdm.processes import pqdm
 from scipy.spatial.ckdtree import cKDTree
-### for test
-from data_loader import MoleculeDataset
-from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
-from torchvision.transforms import ToPILImage, functional
-import matplotlib.pyplot as plt
-import ray
-###
-
+from util import *
 
 def _get_svg_doc(mol):
     """
@@ -61,7 +54,7 @@ def _get_unique_atom_inchi_and_rarity(inchi):
     mol = Chem.MolFromInchi(inchi)
     assert mol, f'Invalid InChI string: {inchi}'
 
-    doc = _get_svg_doc(inchi)
+    doc = _get_svg_doc(mol)
     # get atom positions in order to oversample hard cases
     atoms_pos = np.array([
         [
@@ -79,7 +72,7 @@ def _get_unique_atom_inchi_and_rarity(inchi):
     # min distance
     sampling_weights['global_minimum_dist'] = 1 / (np.min(nearest_dist) + 1e-12)
     # number of atoms closer than half of the average distance
-    sampling_weights['n_close_atoms'] = np.sum(nearest_dist < np.mean(neareset_dist) * 0.5)
+    sampling_weights['n_close_atoms'] = np.sum(nearest_dist < np.mean(nearest_dist) * 0.5)
     # average atom degree
     sampling_weights['average_degree'] = np.array([a.GetDegree() for a in mol.GetAtoms()]).mean()
     # number of triple bonds
@@ -101,9 +94,9 @@ def get_mol_sample_weight(data, data_mode='train', p=1000, base_path='.'):
     mol_rarity = pd.read_csv(mol_rarity_path)
 
     # filter by given list, calculate normalized weight value per image
-    mol_rarity = pd.merge(mol_rarity, data, left_on='file_name', right_on='file_name')
+    mol_rarity = pd.merge(mol_rarity, data, left_on='image_id', right_on='image_id')
     mol_rarity.drop(['InChI'], axis=1, inplace=True)
-    mol_rarity.set_index('file_name', inplace=True)
+    mol_rarity.set_index('image_id', inplace=True)
 
     # sort each column, after filtering, then assign weight values
     for column in mol_rarity.columns:
@@ -160,7 +153,7 @@ def sample_images(mol_weights, n=10000):
     :param n: number of molecules to sample[int]
     :return: Sampled dataset in pandas DataFrame
     '''
-    img_names_sampled = pd.DataFrame.sample(mol_weights, n=n, weights=mol, replace=True)
+    img_names_sampled = pd.DataFrame.sample(mol_weights, n=n, weights=mol_weights, replace=True)
     return img_names_sampled.index.to_list()
 
 def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
@@ -178,6 +171,7 @@ def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
     output_counts_path = base_path + '/dataset/{}_unique_atom_inchi_counts.json'.format(mode)
     output_unique_atoms = base_path + '/dataset/{}_unique_atoms_per_molecule.csv'.format(mode)
     output_mol_rarity = base_path + '/dataset/{}_mol_rarity.csv'.format(mode)
+    print('test cp')
     if all([os.path.exists(p) for p in [output_counts_path, output_unique_atoms]]):
         if overwrite:
             print(f'{color.BLUE}Output files exists, but overwriting. {color.BLUE}')
@@ -186,7 +180,7 @@ def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
                 f'''{color.BOLD}labels JSON {color.END} already exists, skipping process and reading file.\n
                 {color.BLUE} Counts file read from: {color.END} {output_counts_path}\n
                 {color.BLUE} Unique atoms file read from: {color.END} {output_unique_atoms}\n
-                {color.BLUE} Mol rarity file read from: {color.END} {output_counts_path}\n
+                {color.BLUE} Mol rarity file read from: {color.END} {output_mol_rarity}\n
                 {color.BOLD} overwrite: {overwrite} {color.END}
                 '''
             )
@@ -195,27 +189,31 @@ def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
 
     n_jobs = multiprocessing.cpu_count() - 1
     # get unique atom-inchi in each compound and count for sampling later
+    #result = _get_unique_atom_inchi_and_rarity(inchi_list[0])
     result = pqdm(
         inchi_list, 
         _get_unique_atom_inchi_and_rarity,
         n_jobs=n_jobs,
         desc='Calculating unique atom-inchi and rarity'
         )
+    #result, sample_weights = list(map(list, zip(*result)))
+    #print('listmap:', list(map(list, zip(result))))
     result, sample_weights = list(map(list, zip(*result)))
+    counts = Counter(x for xs in result for x in xs)
     # save counts
     with open(output_counts_path, 'w') as f_out:
         json.dump(counts, f_out)
 
     # save sample weights
     sample_weights = pd.DataFrame.from_dict(sample_weights)
-    sample_weights.insert(0, 'file_name', data.file_name)
+    sample_weights.insert(0, 'image_id', data.image_id)
     sample_weights.to_csv(output_mol_rarity, index=False)
     # save unique atoms in each molecule to oversample less represented classes later
     unique_atoms_per_molecule = pd.DataFrame({'InChI': inchi_list, 'unique_atoms': [set(r) for r in result]})
     unique_atoms_per_molecule.to_csv(output_unique_atoms, index=False)
     print(
         f'''{color.BLUE} Counts file saved at: {color.END} {output_counts_path}\n
-        {color.BLUE} Unique atoms file saved at: {color>END} {output_unique_atoms}
+        {color.BLUE} Unique atoms file saved at: {color.END} {output_unique_atoms}
         ''')
     return counts, unique_atoms_per_molecule
 
@@ -317,7 +315,7 @@ def plot_bbox(inchi, labels):
     for ins in annotations:
         ins_type = ins['category_id']
         x, y, w, h = ins['bbox']
-        cv2.rectangle(img, (x, y), (x + w, y + h), np.random.rand(3, ), 2)
+        cv2.rectangle(img, (int(x), int(y)), (int(x + w), int(y + h)), (255, 0, 0), 2)
     cv2.namedWindow(inchi, cv2.WINDOW_NORMAL)
     cv2.imshow(inchi, img)
     cv2.waitKey(0)
@@ -325,7 +323,6 @@ def plot_bbox(inchi, labels):
     return
 
 def preprocess_train_dataset(
-    data_frame, 
     overwrite=False, 
     min_points_threshold=500, 
     n_sample_per_label=20000, 
@@ -333,10 +330,10 @@ def preprocess_train_dataset(
     n_jobs=multiprocessing.cpu_count()-1):
 
     if not all([os.path.exists(f'./dataset/train_annotations_{mode}.pkl') for mode in ['train', 'val']]):
-        data = None
         print(f"{color.BLUE}Creating COCO-style annotations for both sampled datasets [train, val]{color.BLUE}")
-        data = pd.read_csv('./dataset/train_labels.csv')
-        assert data, f"No labels read."
+        data_frame = pd.read_csv('./dataset/train_labels.csv')
+        data_frame = data_frame
+
         # Get counts and unique atoms per molecules to construct datasets.
         counts, unique_atoms_per_molecule = create_unique_ins_labels(data_frame, 
                                                                     mode='train',
@@ -357,42 +354,46 @@ def preprocess_train_dataset(
                                                                 datapoints_per_label=n_sample_per_label)
 
         # sample hard cases
-        sampled_train = sample_images(get_mol_sample_weight(data_frame, n=n_sample_hard))
-        sampled_val = sample_images(get_mol_sample_weight(data_frame, n=n_sample_hard // 100))
+        sampled_train = sample_images(get_mol_sample_weight(data=data_frame, data_mode='train'), n=n_sample_hard)
+        sampled_val = sample_images(get_mol_sample_weight(data=data_frame, data_mode='train'), n=n_sample_hard // 100)
 
         # create splits with sampled data
-        data_frame.set_index('file_name', inplace=True)
+        data_frame.set_index('image_id', inplace=True)
         data_train = data_frame.loc[sampled_train].reset_index()
         data_val = data_frame.loc[sampled_val].reset_index()
+        #data_train = data_frame.sample(frac=0.8, random_state=1)
+        #data_val = data_frame.drop(data_train.index)
 
         # concatenate both datasets
         data_train = pd.concat([data_train, train_balanced])
         data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
+        print('len(data_train):', len(data_train))
+        print('len(data_val):', len(data_val))
 
         # create COCO annotations
         for data_split, mode in zip([data_train, data_val], ['train', 'val']):
-            if os.path.exists(self.base_path + f'/dataset/train_annotations_{mode}.pkl'):
+            if os.path.exists(f'./dataset/train_annotations_{mode}.pkl'):
                 f"{color.BLUE}{mode.capitalize()} already exists, skipping...{color.END}"
                 continue
-            params = [[row.SMILES,
-                        row.file_name,
-                        'train',
-                        unique_labels,
-                        self.base_path] for _, row in data_split.iterrows()]
+            params = [[row.InChI,
+                        row.image_id,
+                        mode,
+                        unique_labels] for _, row in data_split.iterrows()]
             result = pqdm(params,
                             create_COCO_json,
-                            n_jobs=self.n_jobs,
+                            n_jobs=n_jobs,
                             argument_type='args',
                             desc=f'{color.BLUE}Creating COCO-style {mode} annotations{color.END}')
+            #result = create_COCO_json(data_split.iloc[0].InChI, data_split.iloc[0].image_id, 'train', unique_labels)
 
             # clean any corrupted annotation
             result = [annotation for annotation in result if type(annotation) == dict]
             print(f'{color.PURPLE}Saving COCO annotations - {mode}{color.END}')
-            with open(self.base_path + f'/dataset/train_annotations_{mode}.pkl', 'wb') as fout:
+            with open(f'./dataset/train_annotations_{mode}.pkl', 'wb') as fout:
                 pickle.dump(result, fout)
 
         print(f'{color.BLUE}Saving training labels{color.END}')
-        with open(self.base_path + f'/dataset/train_labels.json', 'w') as fout:
+        with open(f'./dataset/train_labels.json', 'w') as fout:
             json.dump(unique_labels, fout)
 
         return
@@ -400,52 +401,40 @@ def preprocess_train_dataset(
         print(f"{color.BLUE}Preprocessed files already exist. Loading annotations... [train, val]{color.END}")
         return
 
-def create_COCO_json(inchi, file_name, mode, labels, base_path='.'):
+def create_COCO_json(inchi, image_id, mode, labels, base_path='.'):
     """
     Create COCO style dataset. If there is not image for the smile
     it creates it.
     :param labels:
     :param inchi: InChI. [str]
-    :param file_name: Name of the image file. [str] eg. 'train_123412.png'
+    :param image_id: Name of the image file. [str]
     :param mode: train or val. [str]
     :param labels: dic with labels and idx for training.
     :param base_path: base path of the environment. [str]
     :return:
     """
-    if not os.path.exists(base_path + f'/dataset/train_detection_{mode}/{file_name}'):
-        mol = Chem.MolFromInchi(inchi)
-        Chem.Draw.MolToImageFile(mol, base_path + f'/dataset/train_detection_{mode}/{file_name}')
+    #if not os.path.exists(base_path + f'/dataset/train_detection_{mode}/{file_name}'):
+    mol = Chem.MolFromInchi(inchi)
+    Chem.Draw.MolToImageFile(
+        mol, os.path.join(f'{base_path}/dataset/train_detection/{mode}/', f'{image_id}.png')
+    )
+    #plot_bbox(inchi, labels)
 
-    return {'file_name':   base_path + f'/dataset/{mode}/{file_name}',
+    return {'file_name':   f'{base_path}/dataset/train_detection/{mode}/{image_id}.png',
             'height':      300,
             'width':       300,
-            'image_id':    file_name,
+            'image_id':    image_id,
             'annotations': get_bbox(inchi, labels)}
 
 
 if __name__ == '__main__':
-    #train_dataset = MoleculeDataset(
-    #    root='./dataset/train/',
-    #    csv='./dataset/train_labels.csv',
-    #    transform=transforms.Compose([
-    #        transforms.ToTensor()
-    #    ])
-    #)
-    #train_dataloader = DataLoader(
-    #    dataset=train_dataset,
-    #    batch_size=1,
-    #    shuffle=False,
-    #    num_workers=8
-    #)
-
-    for i, data in enumerate(train_dataloader):
-        print('input image size:', data[0].size())
-        print('class label:', data[1])
-        print('data[0]:', data[0])
-        img = data[0]#[:]
-        print('image size: ', img.size())
-        print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
-        get_bbox(inchi=data[1][0])
-        plt.imshow(functional.to_pil_image(img.squeeze(0)))
-        plt.show()
-        break
+    train_detection_path = './dataset/train_detection/'
+    if not os.path.exists(train_detection_path):
+        os.mkdir(train_detection_path)
+        train_detection_train_path = './dataset/train_detection/train/'
+        train_detection_val_path = './dataset/train_detection/val/'
+        if not os.path.exists(train_detection_train_path):
+            os.mkdir(train_detection_train_path)
+        if not os.path.exists(train_detection_val_path):
+            os.mkdir(train_detection_val_path)
+    preprocess_train_dataset()
