@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.transforms import ToPILImage, functional
 import matplotlib.pyplot as plt
+import ray
 ###
 
 
@@ -85,6 +86,38 @@ def _get_unique_atom_inchi_and_rarity(inchi):
     sampling_weights['triple_bonds'] = sum([1 for b in mol.GetBonds() if b.GetBondType().name == 'TRIPLE'])
     return [''.join([a.GetSymbol(), str(a.GetFormalCharge())]) for a in mol.GetAtoms()], sampling_weights
 
+def get_mol_sample_weight(data, data_mode='train', p=1000, base_path='.'):
+    """
+    Creating sampling weights to oversample hard cases based on bond, atoms, overlaps and rings.
+    :param data: DataFrame with train data(InChI). [Pandas DF]
+    :param data_mode: Train or extra. [str]
+    :param p: Rarity weight. [int]
+    :param base_path: base path of the environment. [str]
+    :return:
+    """
+    # load rarity file
+    mol_rarity_path = base_path + f'/dataset/{data_mode}_mol_rarity.csv'
+    assert os.path.exists(mol_rarity_path), 'No mol_rarity.csv. Create it first'
+    mol_rarity = pd.read_csv(mol_rarity_path)
+
+    # filter by given list, calculate normalized weight value per image
+    mol_rarity = pd.merge(mol_rarity, data, left_on='file_name', right_on='file_name')
+    mol_rarity.drop(['InChI'], axis=1, inplace=True)
+    mol_rarity.set_index('file_name', inplace=True)
+
+    # sort each column, after filtering, then assign weight values
+    for column in mol_rarity.columns:
+        mol_rarity_col = mol_rarity[column].values.astype(np.float64)
+        mol_rarity_col_sort_idx = np.argsort(mol_rarity_col)
+        ranking_values = np.linspace(1.0 / len(mol_rarity_col), 1.0, num=len(mol_rarity_col))
+        ranking_values = ranking_values ** p
+        mol_rarity_col[mol_rarity_col_sort_idx] = ranking_values
+        mol_rarity[column] = mol_rarity_col
+    # normalized weights per img
+    mol_weights = pd.DataFrame.sum(mol_rarity, axis=1)
+    mol_weights /= pd.DataFrame.sum(mol_weights, axis=0) + 1e-12
+    return mol_weights
+
 def sample_balanced_datasets(data, counts, unique_atoms_per_molecule, datapoints_per_label=2000):
     '''
     Construct a balanced dataset by sampling every label uniformly.
@@ -130,7 +163,7 @@ def sample_images(mol_weights, n=10000):
     img_names_sampled = pd.DataFrame.sample(mol_weights, n=n, weights=mol, replace=True)
     return img_names_sampled.index.to_list()
 
-def create_unique_ins_labels(data, overwrite=False, base_path='.'):
+def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
     '''
     Create a dictionary with the count of each existent atom-inchi in the train dataset
     and a data frame with the atom-inchi in each compound.
@@ -142,9 +175,9 @@ def create_unique_ins_labels(data, overwrite=False, base_path='.'):
     '''
     inchi_list = data.InChI.to_list()
     # check if file exists
-    output_counts_path = base_path + '/data/unique_atom_inchi_counts.json'
-    output_unique_atoms = base_path + '/data/unique_atoms_per_molecule.csv'
-    output_mol_rarity = base_path + '/data/mol_rarity_train.csv'
+    output_counts_path = base_path + '/dataset/{}_unique_atom_inchi_counts.json'.format(mode)
+    output_unique_atoms = base_path + '/dataset/{}_unique_atoms_per_molecule.csv'.format(mode)
+    output_mol_rarity = base_path + '/dataset/{}_mol_rarity.csv'.format(mode)
     if all([os.path.exists(p) for p in [output_counts_path, output_unique_atoms]]):
         if overwrite:
             print(f'{color.BLUE}Output files exists, but overwriting. {color.BLUE}')
@@ -291,22 +324,120 @@ def plot_bbox(inchi, labels):
     cv2.destroyAllWindows()
     return
 
-'''
-if __name__ == '__main__':
-    train_dataset = MoleculeDataset(
-        root='./dataset/train/',
-        csv='./dataset/train_labels.csv',
-        transform=transforms.Compose([
-            transforms.ToTensor()
-        ])
-    )
+def preprocess_train_dataset(
+    data_frame, 
+    overwrite=False, 
+    min_points_threshold=500, 
+    n_sample_per_label=20000, 
+    n_sample_hard=200000, 
+    n_jobs=multiprocessing.cpu_count()-1):
 
-    train_dataloader = DataLoader(
-        dataset=train_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=8
-    )
+    if not all([os.path.exists(f'./dataset/train_annotations_{mode}.pkl') for mode in ['train', 'val']]):
+        data = None
+        print(f"{color.BLUE}Creating COCO-style annotations for both sampled datasets [train, val]{color.BLUE}")
+        data = pd.read_csv('./dataset/train_labels.csv')
+        assert data, f"No labels read."
+        # Get counts and unique atoms per molecules to construct datasets.
+        counts, unique_atoms_per_molecule = create_unique_ins_labels(data_frame, 
+                                                                    mode='train',
+                                                                    overwrite=overwrite)
+
+        # bonds SMARTS
+        unique_bonds = ['-', '=', '#']
+
+        # Choose labels depending on a minimum count.
+        counts = {k: v for k, v in counts.items() if v > min_points_threshold}
+        labels = list(counts.keys()) + unique_bonds
+        unique_labels = {u: idx + 1 for idx, u in zip(range(len(labels)), labels)}
+
+        # Sample uniform datasets among labels
+        train_balanced, val_balanced = sample_balanced_datasets(data_frame,
+                                                                counts,
+                                                                unique_atoms_per_molecule,
+                                                                datapoints_per_label=n_sample_per_label)
+
+        # sample hard cases
+        sampled_train = sample_images(get_mol_sample_weight(data_frame, n=n_sample_hard))
+        sampled_val = sample_images(get_mol_sample_weight(data_frame, n=n_sample_hard // 100))
+
+        # create splits with sampled data
+        data_frame.set_index('file_name', inplace=True)
+        data_train = data_frame.loc[sampled_train].reset_index()
+        data_val = data_frame.loc[sampled_val].reset_index()
+
+        # concatenate both datasets
+        data_train = pd.concat([data_train, train_balanced])
+        data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
+
+        # create COCO annotations
+        for data_split, mode in zip([data_train, data_val], ['train', 'val']):
+            if os.path.exists(self.base_path + f'/dataset/train_annotations_{mode}.pkl'):
+                f"{color.BLUE}{mode.capitalize()} already exists, skipping...{color.END}"
+                continue
+            params = [[row.SMILES,
+                        row.file_name,
+                        'train',
+                        unique_labels,
+                        self.base_path] for _, row in data_split.iterrows()]
+            result = pqdm(params,
+                            create_COCO_json,
+                            n_jobs=self.n_jobs,
+                            argument_type='args',
+                            desc=f'{color.BLUE}Creating COCO-style {mode} annotations{color.END}')
+
+            # clean any corrupted annotation
+            result = [annotation for annotation in result if type(annotation) == dict]
+            print(f'{color.PURPLE}Saving COCO annotations - {mode}{color.END}')
+            with open(self.base_path + f'/dataset/train_annotations_{mode}.pkl', 'wb') as fout:
+                pickle.dump(result, fout)
+
+        print(f'{color.BLUE}Saving training labels{color.END}')
+        with open(self.base_path + f'/dataset/train_labels.json', 'w') as fout:
+            json.dump(unique_labels, fout)
+
+        return
+    else:
+        print(f"{color.BLUE}Preprocessed files already exist. Loading annotations... [train, val]{color.END}")
+        return
+
+def create_COCO_json(inchi, file_name, mode, labels, base_path='.'):
+    """
+    Create COCO style dataset. If there is not image for the smile
+    it creates it.
+    :param labels:
+    :param inchi: InChI. [str]
+    :param file_name: Name of the image file. [str] eg. 'train_123412.png'
+    :param mode: train or val. [str]
+    :param labels: dic with labels and idx for training.
+    :param base_path: base path of the environment. [str]
+    :return:
+    """
+    if not os.path.exists(base_path + f'/dataset/train_detection_{mode}/{file_name}'):
+        mol = Chem.MolFromInchi(inchi)
+        Chem.Draw.MolToImageFile(mol, base_path + f'/dataset/train_detection_{mode}/{file_name}')
+
+    return {'file_name':   base_path + f'/dataset/{mode}/{file_name}',
+            'height':      300,
+            'width':       300,
+            'image_id':    file_name,
+            'annotations': get_bbox(inchi, labels)}
+
+
+if __name__ == '__main__':
+    #train_dataset = MoleculeDataset(
+    #    root='./dataset/train/',
+    #    csv='./dataset/train_labels.csv',
+    #    transform=transforms.Compose([
+    #        transforms.ToTensor()
+    #    ])
+    #)
+    #train_dataloader = DataLoader(
+    #    dataset=train_dataset,
+    #    batch_size=1,
+    #    shuffle=False,
+    #    num_workers=8
+    #)
+
     for i, data in enumerate(train_dataloader):
         print('input image size:', data[0].size())
         print('class label:', data[1])
@@ -318,4 +449,3 @@ if __name__ == '__main__':
         plt.imshow(functional.to_pil_image(img.squeeze(0)))
         plt.show()
         break
-'''

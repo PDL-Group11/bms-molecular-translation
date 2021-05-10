@@ -13,6 +13,7 @@ import cssutils
 import pandas as pd
 import logging
 from tqdm import tqdm
+from rdkit import Chem
 
 
 @ray.remote
@@ -27,12 +28,13 @@ def generate_normal_molecule_image(n, index, labels, save_path):
             removeHs=True, 
             logLevel=None,
             treatWarningAsError=False)
-        svg = dlg._get_svg(mol)
+        #svg = dlg._get_svg(mol)
         # Do some SVG manipulation
-        svg = et.fromstring(svg.encode('iso-8859-1'))
-        img = svg_to_image(svg)
-        img = Image.fromarray((255*(1 - img)).astype(np.uint8))
-        img.save(os.path.join(str(save_path), str(imol) + '.png'))
+        #svg = et.fromstring(svg.encode('iso-8859-1'))
+        #img = svg_to_image(svg)
+        Chem.Draw.MolToImageFile(mol, os.path.join(str(save_path), str(imol) + '.png'))
+        #img = Image.fromarray((255*(1 - img)).astype(np.uint8))
+        #img.save(os.path.join(str(save_path), str(imol) + '.png'))
     return
 
 #@ray.remote
@@ -75,5 +77,6 @@ if __name__ == '__main__':
     print(f'Read {len(LABELS)} training labels.')
     labels = ray.put(LABELS)
     #results = [generate_normal_molecule_image.remote(67338, i, labels, TMP_DIR / 'extra_normal/') for i in range(36)]
-    results = ray.get([generate_normal_molecule_image.remote(67338, i, labels, EXTRA_IMG_SAVE_PATH) for i in range(36)])
+    #results = ray.get([generate_normal_molecule_image.remote(67338, i, labels, EXTRA_IMG_SAVE_PATH) for i in range(36)])
+    results = ray.get([generate_normal_molecule_image.remote(10, i, labels, EXTRA_IMG_SAVE_PATH) for i in range(36)])
     print('DONE!')
