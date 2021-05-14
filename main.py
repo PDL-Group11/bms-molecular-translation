@@ -1,7 +1,8 @@
-import utils
+# import utils
 from runner import Runner
-from model import get_model
-
+# from utils import get_cfg
+from models import get_model
+from data_loader import get_data, get_loader
 import os
 import argparse
 from glob import glob
@@ -11,6 +12,7 @@ import torch.nn as nn
 import torch.cuda as cuda
 from pathlib import Path
 
+from mmdet.models import build_detector
 def arg_parse():
     desc = "BMS Molecular Translation"
     parser = argparse.ArgumentParser(description=desc)
@@ -26,8 +28,12 @@ def arg_parse():
                         help='Directory name to save the model')
 
     # Model
-    parser.add_argument('--model', type=str, default='swin', choices=["swin"], # models might be added 
+    parser.add_argument('--model', type=str, default="fast_rcnn", required=True, choices=["fast_rcnn", "mask_rcnn"],
                         help='model type')
+    parser.add_argument('--backbone', type=str, default="mobilenet_v2", required=True, choices=["resnet_50", "mobilenet_v2", "swin_transformer"],
+                        help='backbone or classifier of detector')
+    parser.add_argument('--num_classes', type=int, default=35, required=True, 
+                        help='number of classes to be detected')
 
     # Training configuration
     parser.add_argument('--epoch', type=int, default=200, help='epochs')
@@ -64,31 +70,24 @@ if __name__ == "__main__":
     os.makedirs(f'/{arg.log_dir}/', exist_ok=True)
     os.makedirs(f'/{arg.save_dir}/', exist_ok=True)
 
-    train_path, val_path, test_path = get_data_path()
-    train_loader, val_loader, test_loader = get_loader(
-        train_path=train_path,
-        val_path=val_path,
-        test_path=test_path,
-        batch_train=arg.batch_train,
-        batch_test=arg.batch_test,
-    )
+    root, csv, transform = get_data()
+    train_loader, val_loader, test_loader = get_loader(arg, root, csv, transform)
 
     #TODO: get model with backbone (Swin Transformer) and classifier 
-    net = get_model()
-    net = nn.DataParallel(net).to(device)
+    model = get_model(arg, pretrained=False)
+    model = nn.DataParallel(model).to(device)
     
     #TODO: add loss criterion
-    loss = 
-    model = Runner(arg, device, net, train_loader, val_loader, test_loader, loss)
+    runner = Runner(arg, device, model, train_loader, val_loader, test_loader)
 
     if arg.load_last:
         print(" === load last trained model ===")
-        model.load()
+        runner.load()
     if arg.load_path:
         print(" === load model from {arg.load_path} ===")
-        model.load(abs_filename=arg.load_path)
+        runner.load(abs_filename=arg.load_path)
     if arg.test:
         print(" === inference === ")
-        model.test()
+        runner.test()
     else:
-        model.train()
+        runner.train()
