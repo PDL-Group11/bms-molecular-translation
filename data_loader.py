@@ -51,6 +51,45 @@ class MoleculeDataset(Dataset):
         self.transform = transform
 
 
+def get_data():
+    
+    root = {
+        'train': './dataset/train/',
+        'test': './dataset/test/'
+    }
+
+    csv = {
+        'train': './dataset/train_labels.csv',
+        'test': './dataset/sample_submission.csv'
+    }
+
+    transform = {
+        'train': transforms.Compose([
+            transforms.ToTensor()
+        ]),
+        'val': transforms.Compose([
+            transforms.ToTensor()
+        ]),
+        'test': transforms.Compose([
+            transforms.ToTensor()
+        ])
+    }
+
+    return root, csv, transform
+
+def get_loader(arg, root, csv, transform):
+    
+    train_dataset = MoleculeDataset(root['train'], csv['train'], transform['train'])
+    val_dataset = MoleculeDataset(root['train'], csv['train'], transform['val'])
+    test_dataset = MoleculeDataset(root['test'], csv['test'], transform['test'])
+
+    train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8)
+    val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8)
+    test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8)
+
+    return train_loader, val_loader, test_loader
+
+
 if __name__ == '__main__':
 
     train_dataset = MoleculeDataset(
