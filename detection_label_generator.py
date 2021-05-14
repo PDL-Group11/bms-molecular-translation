@@ -167,6 +167,7 @@ def create_unique_ins_labels(data, mode, overwrite=False, base_path='.'):
     :return: Dict of counts[dict] and dataframe of unique atom-inchi per compound.
     '''
     inchi_list = data.InChI.to_list()
+    print('')
     # check if file exists
     output_counts_path = base_path + '/dataset/{}_unique_atom_inchi_counts.json'.format(mode)
     output_unique_atoms = base_path + '/dataset/{}_unique_atoms_per_molecule.csv'.format(mode)
@@ -248,7 +249,6 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10):
                    'y':    int(round(float(path.getAttribute('drawing-y')), 0)),
                    'type': ''.join([a.GetSymbol(), str(a.GetFormalCharge())])} for path, a in
                   zip(doc.getElementsByTagName('rdkit:atom'), mol.GetAtoms())]
-    #print('atoms_data:', atoms_data)
 
     annotations = []
     # annotating bonds
@@ -266,6 +266,13 @@ def get_bbox(inchi, unique_labels, atom_margin=12, bond_margin=10):
         # creating bbox coordinates as XYWH
         begin_atm_idx = int(path.getAttribute('begin-atom-idx')) - 1
         end_atom_idx = int(path.getAttribute('end-atom-idx')) - 1
+        #print('begin_atm_idx:', begin_atm_idx)
+        #print('end_atm_idx:', end_atom_idx)
+        #print('len(atoms_data):', len(atoms_data))
+        if begin_atm_idx >= len(atoms_data):
+            begin_atm_idx = len(atoms_data) - 1
+        if end_atom_idx >= len(atoms_data):
+            end_atom_idx = len(atoms_data) - 1
         # left-most pos
         x = min(atoms_data[begin_atm_idx]['x'], atoms_data[end_atom_idx]['x']) - margin // 2 
         # up-most pos
@@ -411,7 +418,10 @@ def preprocess_extra_dataset(
     if not all([os.path.exists(f'./dataset/extra_annotations_{mode}.pkl') for mode in ['train', 'val']]):
         print(f"{color.BLUE}Creating COCO-style extra annotations for both sampled datasets [train, val]{color.BLUE}")
         data_frame = pd.read_csv('./dataset/extra_approved_InChIs.csv')
-        data_frame = data_frame
+        data_frame = data_frame[:1]
+        if 'image_id' not in data_frame:
+            data_frame['image_id'] = data_frame.index
+        print('len(data_frame):', len(data_frame))
 
         # Get counts and unique atoms per molecules to construct datasets.
         counts, unique_atoms_per_molecule = create_unique_ins_labels(data_frame, 
@@ -440,14 +450,10 @@ def preprocess_extra_dataset(
         data_frame.set_index('image_id', inplace=True)
         data_train = data_frame.loc[sampled_train].reset_index()
         data_val = data_frame.loc[sampled_val].reset_index()
-        #data_train = data_frame.sample(frac=0.8, random_state=1)
-        #data_val = data_frame.drop(data_train.index)
 
         # concatenate both datasets
         data_train = pd.concat([data_train, train_balanced])
         data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
-        print('len(data_train):', len(data_train))
-        print('len(data_val):', len(data_val))
 
         # create COCO annotations
         for data_split, mode in zip([data_train, data_val], ['train', 'val']):
@@ -463,7 +469,7 @@ def preprocess_extra_dataset(
                             n_jobs=n_jobs,
                             argument_type='args',
                             desc=f'{color.BLUE}Creating COCO-style extra {mode} annotations{color.END}')
-            #result = create_COCO_json(data_split.iloc[0].InChI, data_split.iloc[0].image_id, 'train', unique_labels)
+            #result = create_extra_COCO_json(data_split.iloc[0].InChI, data_split.iloc[0].image_id, 'train', unique_labels)
 
             # clean any corrupted annotation
             result = [annotation for annotation in result if type(annotation) == dict]
@@ -523,6 +529,8 @@ def create_extra_COCO_json(inchi, image_id, mode, labels, base_path='.'):
         mol, os.path.join(f'{base_path}/dataset/extra_detection/{mode}/', f'{image_id}.png')
     )
     #plot_bbox(inchi, labels)
+    #print('labels:', labels)
+    #print('get_bbox(inchi, labels):', get_bbox(inchi, labels))
 
     return {'file_name':   f'{base_path}/dataset/extra_detection/{mode}/{image_id}.png',
             'height':      300,
