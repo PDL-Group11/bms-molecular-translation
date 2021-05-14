@@ -380,7 +380,7 @@ def preprocess_train_dataset(
                         mode,
                         unique_labels] for _, row in data_split.iterrows()]
             result = pqdm(params,
-                            create_COCO_json,
+                            create_train_COCO_json,
                             n_jobs=n_jobs,
                             argument_type='args',
                             desc=f'{color.BLUE}Creating COCO-style {mode} annotations{color.END}')
@@ -401,7 +401,86 @@ def preprocess_train_dataset(
         print(f"{color.BLUE}Preprocessed files already exist. Loading annotations... [train, val]{color.END}")
         return
 
-def create_COCO_json(inchi, image_id, mode, labels, base_path='.'):
+def preprocess_extra_dataset(
+    overwrite=False, 
+    min_points_threshold=500, 
+    n_sample_per_label=20000, 
+    n_sample_hard=200000, 
+    n_jobs=multiprocessing.cpu_count()-1):
+
+    if not all([os.path.exists(f'./dataset/extra_annotations_{mode}.pkl') for mode in ['train', 'val']]):
+        print(f"{color.BLUE}Creating COCO-style extra annotations for both sampled datasets [train, val]{color.BLUE}")
+        data_frame = pd.read_csv('./dataset/extra_approved_InChIs.csv')
+        data_frame = data_frame
+
+        # Get counts and unique atoms per molecules to construct datasets.
+        counts, unique_atoms_per_molecule = create_unique_ins_labels(data_frame, 
+                                                                    mode='extra',
+                                                                    overwrite=overwrite)
+
+        # bonds SMARTS
+        unique_bonds = ['-', '=', '#']
+
+        # Choose labels depending on a minimum count.
+        counts = {k: v for k, v in counts.items() if v > min_points_threshold}
+        labels = list(counts.keys()) + unique_bonds
+        unique_labels = {u: idx + 1 for idx, u in zip(range(len(labels)), labels)}
+
+        # Sample uniform datasets among labels
+        train_balanced, val_balanced = sample_balanced_datasets(data_frame,
+                                                                counts,
+                                                                unique_atoms_per_molecule,
+                                                                datapoints_per_label=n_sample_per_label)
+
+        # sample hard cases
+        sampled_train = sample_images(get_mol_sample_weight(data=data_frame, data_mode='extra'), n=n_sample_hard)
+        sampled_val = sample_images(get_mol_sample_weight(data=data_frame, data_mode='extra'), n=n_sample_hard // 100)
+
+        # create splits with sampled data
+        data_frame.set_index('image_id', inplace=True)
+        data_train = data_frame.loc[sampled_train].reset_index()
+        data_val = data_frame.loc[sampled_val].reset_index()
+        #data_train = data_frame.sample(frac=0.8, random_state=1)
+        #data_val = data_frame.drop(data_train.index)
+
+        # concatenate both datasets
+        data_train = pd.concat([data_train, train_balanced])
+        data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
+        print('len(data_train):', len(data_train))
+        print('len(data_val):', len(data_val))
+
+        # create COCO annotations
+        for data_split, mode in zip([data_train, data_val], ['train', 'val']):
+            if os.path.exists(f'./dataset/extra_annotations_{mode}.pkl'):
+                f"{color.BLUE}{mode.capitalize()} already exists, skipping...{color.END}"
+                continue
+            params = [[row.InChI,
+                        row.image_id,
+                        mode,
+                        unique_labels] for _, row in data_split.iterrows()]
+            result = pqdm(params,
+                            create_extra_COCO_json,
+                            n_jobs=n_jobs,
+                            argument_type='args',
+                            desc=f'{color.BLUE}Creating COCO-style extra {mode} annotations{color.END}')
+            #result = create_COCO_json(data_split.iloc[0].InChI, data_split.iloc[0].image_id, 'train', unique_labels)
+
+            # clean any corrupted annotation
+            result = [annotation for annotation in result if type(annotation) == dict]
+            print(f'{color.PURPLE}Saving extra COCO annotations - {mode}{color.END}')
+            with open(f'./dataset/extra_annotations_{mode}.pkl', 'wb') as fout:
+                pickle.dump(result, fout)
+
+        print(f'{color.BLUE}Saving extra training labels{color.END}')
+        with open(f'./dataset/extra_labels.json', 'w') as fout:
+            json.dump(unique_labels, fout)
+
+        return
+    else:
+        print(f"{color.BLUE}Preprocessed files already exist. Loading annotations... [train, val]{color.END}")
+        return
+
+def create_train_COCO_json(inchi, image_id, mode, labels, base_path='.'):
     """
     Create COCO style dataset. If there is not image for the smile
     it creates it.
@@ -426,9 +505,34 @@ def create_COCO_json(inchi, image_id, mode, labels, base_path='.'):
             'image_id':    image_id,
             'annotations': get_bbox(inchi, labels)}
 
+def create_extra_COCO_json(inchi, image_id, mode, labels, base_path='.'):
+    """
+    Create COCO style dataset. If there is not image for the smile
+    it creates it.
+    :param labels:
+    :param inchi: InChI. [str]
+    :param image_id: Name of the image file. [str]
+    :param mode: train or val. [str]
+    :param labels: dic with labels and idx for training.
+    :param base_path: base path of the environment. [str]
+    :return:
+    """
+    #if not os.path.exists(base_path + f'/dataset/train_detection_{mode}/{file_name}'):
+    mol = Chem.MolFromInchi(inchi)
+    Chem.Draw.MolToImageFile(
+        mol, os.path.join(f'{base_path}/dataset/extra_detection/{mode}/', f'{image_id}.png')
+    )
+    #plot_bbox(inchi, labels)
+
+    return {'file_name':   f'{base_path}/dataset/extra_detection/{mode}/{image_id}.png',
+            'height':      300,
+            'width':       300,
+            'image_id':    image_id,
+            'annotations': get_bbox(inchi, labels)}
 
 if __name__ == '__main__':
     train_detection_path = './dataset/train_detection/'
+    extra_detection_path = './dataset/extra_detection/'
     if not os.path.exists(train_detection_path):
         os.mkdir(train_detection_path)
         train_detection_train_path = './dataset/train_detection/train/'
@@ -437,4 +541,13 @@ if __name__ == '__main__':
             os.mkdir(train_detection_train_path)
         if not os.path.exists(train_detection_val_path):
             os.mkdir(train_detection_val_path)
-    preprocess_train_dataset()
+    if not os.path.exists(extra_detection_path):
+        os.mkdir(extra_detection_path)
+        extra_detection_train_path = './dataset/extra_detection/train/'
+        extra_detection_val_path = './dataset/extra_detection/val/'
+        if not os.path.exists(extra_detection_train_path):
+            os.mkdir(extra_detection_train_path)
+        if not os.path.exists(extra_detection_val_path):
+            os.mkdir(extra_detection_val_path)
+    #preprocess_train_dataset()
+    preprocess_extra_dataset()
