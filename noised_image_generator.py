@@ -28,22 +28,6 @@ from rdkit.Chem.Draw import MolDrawOptions
 import time
 import ray
 
-ray.init()
-PROJECT_DIR = Path('.')
-INPUT_DIR = PROJECT_DIR / 'dataset'
-TMP_DIR = PROJECT_DIR / 'tmp'
-TRAIN_DATA_PATH = INPUT_DIR
-TRAIN_LABELS_PATH = INPUT_DIR / 'extra_approved_InChIs.csv'
-TMP_DIR.mkdir(exist_ok=True)
-
-cssutils.log.setLevel(logging.CRITICAL)
-
-np.set_printoptions(edgeitems=30, linewidth=180)
-print('RDKit version:', rdkit.__version__)
-# Use a specific version of RDKit with known characteristics so that we can reliably manipulate output SVG.
-# assert rdkit.__version__ == '2020.03.6'
-
-TRAIN_LABELS = pd.read_csv(TRAIN_LABELS_PATH)
 
 def one_in(n):
     return np.random.randint(n) == 0 and True or False
@@ -215,6 +199,23 @@ def test_random_molecule_image(n, index,labels):
     return
 
 if __name__ == '__main__':
+
+    ray.init()
+    PROJECT_DIR = Path('.')
+    INPUT_DIR = PROJECT_DIR / 'dataset'
+    TMP_DIR = PROJECT_DIR / 'tmp'
+    TRAIN_DATA_PATH = INPUT_DIR
+    TRAIN_LABELS_PATH = INPUT_DIR / 'extra_approved_InChIs.csv'
+    TMP_DIR.mkdir(exist_ok=True)
+
+    cssutils.log.setLevel(logging.CRITICAL)
+
+    np.set_printoptions(edgeitems=30, linewidth=180)
+    print('RDKit version:', rdkit.__version__)
+    # Use a specific version of RDKit with known characteristics so that we can reliably manipulate output SVG.
+    # assert rdkit.__version__ == '2020.03.6'
+
+    TRAIN_LABELS = pd.read_csv(TRAIN_LABELS_PATH)
 
     print(f'Read {len(TRAIN_LABELS)} training labels.')
     labels = ray.put(TRAIN_LABELS)
