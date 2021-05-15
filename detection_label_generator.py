@@ -5,12 +5,15 @@ import pandas as pd
 import json
 import multiprocessing
 import pickle
-from rdkit.Chem import Draw
+from PIL import Image
 from rdkit import Chem
+from rdkit.Chem import Draw
+from rdkit.Chem.Draw import MolDrawOptions
 from xml.dom import minidom
 from collections import defaultdict, Counter
 from pqdm.processes import pqdm
 from scipy.spatial.ckdtree import cKDTree
+import skimage.measure
 from util import *
 
 def _get_svg_doc(mol):
@@ -500,10 +503,34 @@ def create_train_COCO_json(inchi, image_id, mode, labels, base_path='.'):
     """
     #if not os.path.exists(base_path + f'/dataset/train_detection_{mode}/{file_name}'):
     mol = Chem.MolFromInchi(inchi)
-    Chem.Draw.MolToImageFile(
-        mol, os.path.join(f'{base_path}/dataset/train_detection/{mode}/', f'{image_id}.png')
-    )
+    # Chem.Draw.MolToImageFile(
+    #     mol, os.path.join(f'{base_path}/dataset/train_detection/{mode}/', f'{image_id}.png')
+    # )
     #plot_bbox(inchi, labels)
+
+    options = MolDrawOptions()
+    options.useBWAtomPalette()
+
+    img = Chem.Draw.MolToImage(mol, size=(600,600), options=options)
+    fn = lambda x : 0 if x < 100 else 255
+    img = img.convert('L').point(fn, mode='1')
+    img = np.asarray(img)
+
+    img = skimage.measure.block_reduce(img, (2,2), np.min)
+    
+    # add white points
+    salt_amount = np.random.uniform(0, 10/mol.GetNumAtoms())
+    salt = np.random.uniform(0, 1, img.shape) < salt_amount
+    img = np.logical_or(img, salt)
+
+    # add black points
+    pepper_amount = np.random.uniform(0, 0.001)
+    pepper = np.random.uniform(0, 1, img.shape) < pepper_amount
+    img = np.logical_or(1 - img, pepper)
+    
+    img = img.astype(np.uint8)
+    img = Image.fromarray((255*(1 - img)).astype(np.uint8))
+    img.save(f'{base_path}/dataset/train_detection/{mode}/{image_id}.png')
 
     return {'file_name':   f'{base_path}/dataset/train_detection/{mode}/{image_id}.png',
             'height':      300,
@@ -557,5 +584,5 @@ if __name__ == '__main__':
             os.mkdir(extra_detection_train_path)
         if not os.path.exists(extra_detection_val_path):
             os.mkdir(extra_detection_val_path)
-    #preprocess_train_dataset()
-    preprocess_extra_dataset()
+    preprocess_train_dataset()
+    # preprocess_extra_dataset()
