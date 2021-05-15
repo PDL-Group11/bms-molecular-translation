@@ -61,8 +61,7 @@ class DetectionDataset:
             The PyTorch DataLoader class will use this method to make an iterable for
             our training or validation loop.
         """
-
-        img = self.data[0][idx]
+        img = self.data[idx][0]
         label = self.label[idx]
         if self.transform:
             img = self.transform(img)
@@ -151,6 +150,7 @@ if __name__ == '__main__':
         shuffle=False,
         num_workers=0
     )
+
     for i, data in enumerate(train_dataloader):
         print('input image size:', data[0].size())
         print('class label:', data[1])
@@ -159,10 +159,9 @@ if __name__ == '__main__':
         print('image size: ', img.size())
         img = img.permute(1, 2, 0)
         print('img:', img)
-        print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
-        PIL_image = Image.fromarray(img.numpy())
-        plt.imshow(PIL_image)
-        #plt.imshow(functional.to_pil_image(img.squeeze(0)))
+        print('type(img):', type(img))
+        print("max: {}, min: {}, mean: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy()), np.average(img.cpu().numpy())))
+        #plt.imshow(functional.to_pil_image(img))
         #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
         #plt.show()
         
