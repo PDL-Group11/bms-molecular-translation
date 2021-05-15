@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from PIL import Image
 import pandas as pd
 import os
+import pickle
 
 class Dataset:
 
@@ -37,6 +38,37 @@ class Dataset:
             img = self.transform(img)
         return img, label
 
+class DetectionDataset:
+
+    def __init__(self, root, pkl, transform=None):
+        """Init function should not do any heavy lifting, but
+            must initialize how many items are available in this data set.
+        """
+
+        self.data = datasets.ImageFolder(root, transform)
+        with open(pkl, 'rb') as f:
+            label = pickle.load(f)
+        self.label = label 
+        self.transform = transform
+
+    def __len__(self):
+        """return number of points in our dataset"""
+
+        return len(self.label)
+
+    def __getitem__(self, idx):
+        """ Here we have to return the item requested by `idx`
+            The PyTorch DataLoader class will use this method to make an iterable for
+            our training or validation loop.
+        """
+
+        img = self.data[0][idx]
+        label = self.label[idx]
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
+
 class MoleculeDataset(Dataset):
 
     def __init__(self, root, csv, transform=None):
@@ -47,6 +79,19 @@ class MoleculeDataset(Dataset):
             transform (callable, optional): optional transform on samples
         '''
         super(MoleculeDataset, self).__init__(root, csv)
+        self.root = root
+        self.transform = transform
+
+class MoleculeDetectionDataset(DetectionDataset):
+
+    def __init__(self, root, pkl, transform=None):
+        '''
+        args:
+            pkl (string): label pkl path
+            root (string): image files path
+            transform (callable, optional): optional transform on samples
+        '''
+        super(MoleculeDetectionDataset, self).__init__(root, pkl)
         self.root = root
         self.transform = transform
 
@@ -92,9 +137,9 @@ def get_loader(arg, root, csv, transform):
 
 if __name__ == '__main__':
 
-    train_dataset = MoleculeDataset(
-        root='./dataset/train/',
-        csv='./dataset/train_labels.csv',
+    train_dataset = MoleculeDetectionDataset(
+        root='./dataset/train_detection/',
+        pkl='./dataset/train_annotations_train.pkl',
         transform=transforms.Compose([
             transforms.ToTensor()
         ])
@@ -104,15 +149,20 @@ if __name__ == '__main__':
         dataset=train_dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=8
+        num_workers=0
     )
     for i, data in enumerate(train_dataloader):
         print('input image size:', data[0].size())
         print('class label:', data[1])
         print('data[0]:', data[0])
-        img = data[0]#[:]
+        img = data[0].squeeze(0)#[:]
         print('image size: ', img.size())
+        img = img.permute(1, 2, 0)
+        print('img:', img)
         print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
+        PIL_image = Image.fromarray(img.numpy())
+        plt.imshow(PIL_image)
         #plt.imshow(functional.to_pil_image(img.squeeze(0)))
+        #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
         #plt.show()
         
