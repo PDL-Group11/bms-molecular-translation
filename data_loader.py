@@ -32,7 +32,7 @@ class Dataset:
             our training or validation loop.
         """
 
-        img = self.data[0][idx]
+        img = self.data[idx][0]
         label = self.label_frame.iloc[idx, 1]
         if self.transform:
             img = self.transform(img)
@@ -62,7 +62,7 @@ class DetectionDataset:
             our training or validation loop.
         """
         img = self.data[idx][0]
-        label = self.label[idx]
+        label = self.label[idx]['annotations']
         if self.transform:
             img = self.transform(img)
         return img, label
@@ -161,7 +161,7 @@ if __name__ == '__main__':
         print('img:', img)
         print('type(img):', type(img))
         print("max: {}, min: {}, mean: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy()), np.average(img.cpu().numpy())))
-        #plt.imshow(functional.to_pil_image(img))
+        plt.imshow(functional.to_pil_image(img))
         #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
         #plt.show()
         
