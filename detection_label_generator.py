@@ -421,7 +421,7 @@ def preprocess_extra_dataset(
     if not all([os.path.exists(f'./dataset/extra_annotations_{mode}.pkl') for mode in ['train', 'val']]):
         print(f"{color.BLUE}Creating COCO-style extra annotations for both sampled datasets [train, val]{color.BLUE}")
         data_frame = pd.read_csv('./dataset/extra_approved_InChIs.csv')
-        data_frame = data_frame[:1]
+        data_frame = data_frame
         if 'image_id' not in data_frame:
             data_frame['image_id'] = data_frame.index
         print('len(data_frame):', len(data_frame))
