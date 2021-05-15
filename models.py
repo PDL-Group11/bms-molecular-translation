@@ -1,7 +1,11 @@
+import torch
 import torchvision
 from torchvision.models.detection import FasterRCNN, MaskRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from swin_transformer import SwinTransformer
+
+from collections import OrderedDict
+import argparse
 
 def get_model(arg, pretrained=False):
     if arg.backbone == "resnet_50":
@@ -15,8 +19,8 @@ def get_model(arg, pretrained=False):
         backbone = SwinTransformer()
         # TODO: Need to check the number of output channels
     
-    anchor = AnchorGenerator(sizes=((32, 64, 128, 256, 512),), 
-                            aspect_ratio=((0.5, 0.1, 2.0),))
+    anchor = AnchorGenerator(sizes=((32, 64, 128, 256, 512),),
+                                   aspect_ratios=((0.5, 1.0, 2.0),))
 
     roi_pooler = torchvision.ops.MultiScaleRoIAlign(featmap_names=['0'],
                                                     output_size=7,
@@ -35,3 +39,14 @@ def get_model(arg, pretrained=False):
         
         
     return model
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="fast_rcnn")
+    parser.add_argument("--backbone", default="mobilenet_v2")
+    parser.add_argument("--num_classes", default=2)
+
+    arg = parser.parse_args()
+    model = get_model(arg)
+    print(model)
