@@ -150,6 +150,9 @@ class MetricLogger(object):
     def update(self, **kwargs):
         for k, v in kwargs.items():
             if isinstance(v, torch.Tensor):
+                if torch.numel(v) > 1:
+                    v = torch.sum(v)
+                    v /= torch.numel(v)
                 v = v.item()
             assert isinstance(v, (float, int))
             self.meters[k].update(v)
