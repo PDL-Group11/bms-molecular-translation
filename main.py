@@ -16,7 +16,7 @@ def arg_parse():
     parser = argparse.ArgumentParser(description=desc)
 
     # System configuration
-    parser.add_argument('--gpus', type=str, default="0",
+    parser.add_argument('--gpus', type=str, default="8",
                         help="Select GPUs (Default : Maximum number of available GPUs)")
     parser.add_argument('--cpus', type=int, default="32",
                         help="Select the number of CPUs")
@@ -30,7 +30,7 @@ def arg_parse():
                         help='model type')
     parser.add_argument('--backbone', type=str, default="mobilenet_v2", choices=["resnet_50", "mobilenet_v2", "swin_transformer"],
                         help='backbone or classifier of detector')
-    parser.add_argument('--num_classes', type=int, default=35,  
+    parser.add_argument('--num_classes', type=int, default=18,  
                         help='number of classes to be detected')
 
     # Training configuration
