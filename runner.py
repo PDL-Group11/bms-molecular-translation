@@ -3,12 +3,10 @@ from glob import glob
 from collections import defaultdict
 
 import torch
-from torchvision.de
 from reference.engine import train_one_epoch, evaluate
 from sklearn.metrics import roc_curve
 
-from .BaseRunner import BaseRunner
-from utils import BinaryMetrics, get_optimal_threshold
+# from utils import BinaryMetrics, get_optimal_threshold
 
 import numpy as np
 import csv
@@ -29,7 +27,8 @@ class Runner:
         self.best_loss = 9999.0
         self.last_filename = ""
         self.save_path = arg.save_dir
-
+        self.start_epoch = 0
+        self.epoch = arg.epoch
         self.log_outs = defaultdict(list)
         self.cluster_outs = []
     
