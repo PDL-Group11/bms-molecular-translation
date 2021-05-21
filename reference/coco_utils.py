@@ -9,7 +9,7 @@ import torchvision
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
 
-import transforms as T
+import torchvision.transforms as T
 
 
 class FilterAndRemapCocoCategories(object):
@@ -152,8 +152,8 @@ def convert_to_coco_api(ds):
     for img_idx in range(len(ds)):
         # find better way to get target
         # targets = ds.get_annotations(img_idx)
-        img, targets = ds[img_idx]
-        image_id = targets["image_id"].item()
+        img, targets = ds[img_idx] 
+        image_id = targets["image_id"]
         img_dict = {}
         img_dict['id'] = image_id
         img_dict['height'] = img.shape[-2]
@@ -164,7 +164,7 @@ def convert_to_coco_api(ds):
         bboxes = bboxes.tolist()
         labels = targets['labels'].tolist()
         areas = targets['area'].tolist()
-        iscrowd = targets['iscrowd'].tolist()
+        # iscrowd = targets['iscrowd'].tolist()
         if 'masks' in targets:
             masks = targets['masks']
             # make masks Fortran contiguous for coco_mask
@@ -180,7 +180,7 @@ def convert_to_coco_api(ds):
             ann['category_id'] = labels[i]
             categories.add(labels[i])
             ann['area'] = areas[i]
-            ann['iscrowd'] = iscrowd[i]
+            # ann['iscrowd'] = iscrowd[i]
             ann['id'] = ann_id
             if 'masks' in targets:
                 ann["segmentation"] = coco_mask.encode(masks[i].numpy())

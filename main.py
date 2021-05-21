@@ -1,9 +1,11 @@
-# import utils
+import os
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 2'
+
 from runner import Runner
 # from utils import get_cfg
 from models import get_model
 from data_loader import get_data, get_loader
-import os
 import argparse
 from glob import glob
 import random
@@ -11,15 +13,18 @@ import torch
 import torch.nn as nn
 import torch.cuda as cuda
 from pathlib import Path
-
 from mmdet.models import build_detector
+
+from apex.parallel import DistributedDataParallel as DDP
+import multiprocessing as mp
+
 def arg_parse():
     desc = "BMS Molecular Translation"
     parser = argparse.ArgumentParser(description=desc)
 
     # System configuration
-    parser.add_argument('--gpus', type=str, default="0,1,2,3,4,5,6",
-                        help="Select GPUs (Default : Maximum number of available GPUs)")
+    #parser.add_argument('--gpus', type=str, default="0,1,2,3,4,5,6",
+    #                    help="Select GPUs (Default : Maximum number of available GPUs)")
     parser.add_argument('--cpus', type=int, default="32",
                         help="Select the number of CPUs")
 
@@ -54,6 +59,15 @@ def arg_parse():
                         help="learning rate")
     parser.add_argument('--beta', type=float, default=(0.9, 0.999), nargs="*",
                         help="parameter beta for Adam optimizer")
+
+    # DDP
+    parser.add_argument('-n', '--nodes', default=1,
+                        type=int, metavar='N')
+    parser.add_argument('-g', '--gpus', default=1, type=int,
+                        help='number of gpus per node')
+    parser.add_argument('-nr', '--nr', default=0, type=int,
+                        help='ranking within the nodes')
+
     return parser.parse_args()
 
 
@@ -61,24 +75,25 @@ if __name__ == "__main__":
 
     arg = arg_parse()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = arg.gpus
+    #os.environ["CUDA_VISIBLE_DEVICES"] = arg.gpus
     device = torch.device("cuda")
 
-    arg.save_dir = "/saved_model"
-    arg.log_dir = "/log_dir"
+    arg.save_dir = "faster_rcnn/model_mobilenet"
+    arg.log_dir = "faster_rcnn/mobilenet"
     
-    os.makedirs(f'/{arg.log_dir}/', exist_ok=True)
-    os.makedirs(f'/{arg.save_dir}/', exist_ok=True)
+    os.makedirs(f'./outs/{arg.log_dir}/', exist_ok=True)
+    os.makedirs(f'./outs/{arg.save_dir}/', exist_ok=True)
 
-    root, csv, transform = get_data()
-    train_loader, val_loader, test_loader = get_loader(arg, root, csv, transform)
+    #root, csv, transform = get_data()
+    #train_loader, val_loader, test_loader = get_loader(arg, root, csv, transform)
 
     #TODO: get model with backbone (Swin Transformer) and classifier 
-    model = get_model(arg, pretrained=False)
-    model = nn.DataParallel(model).to(device)
+    model = get_model(arg, pretrained=True)
+    #model = nn.DataParallel(model).to(device)
     
     #TODO: add loss criterion
-    runner = Runner(arg, device, model, train_loader, val_loader, test_loader)
+    #runner = Runner(arg, device, model, train_loader, val_loader, test_loader)
+    runner = Runner(arg, model)
 
     if arg.load_last:
         print(" === load last trained model ===")
@@ -90,4 +105,10 @@ if __name__ == "__main__":
         print(" === inference === ")
         runner.test()
     else:
-        runner.train()
+        #########################################################
+        arg.world_size = arg.gpus * arg.nodes                #
+        os.environ['MASTER_ADDR'] = '127.0.0.1'              #
+        os.environ['MASTER_PORT'] = '8888'                      #
+        mp.spawn(runner.train, nprocs=arg.gpus, arg=())         #
+        #########################################################
+        #runner.train()
