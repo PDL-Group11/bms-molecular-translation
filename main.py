@@ -1,6 +1,6 @@
 import os
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 2'
+#os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 2'
 
 from runner import Runner
 from models import get_model
@@ -59,7 +59,7 @@ def arg_parse():
     # DDP
     parser.add_argument('-n', '--nodes', default=1,
                         type=int, metavar='N')
-    parser.add_argument('-g', '--gpus', default=1, type=int,
+    parser.add_argument('-g', '--gpus', default=8, type=int,
                         help='number of gpus per node')
     parser.add_argument('-nr', '--nr', default=0, type=int,
                         help='ranking within the nodes')

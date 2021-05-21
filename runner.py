@@ -96,6 +96,7 @@ class Runner:
         print(" ===== Training ===== \n")
         # self.model.train()
         rank = self.arg.nr * self.arg.gpus + gpu
+        print('rank:', rank)
         dist.init_process_group(backend='nccl', init_method='env://', world_size=self.arg.world_size, rank=rank)
         torch.cuda.set_device(gpu)
         self.model.cuda(gpu)
@@ -146,8 +147,13 @@ class Runner:
             num_workers=0,
             sampler=test_sampler,
             )
+
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
         
         device = torch.device("cuda")
+        self.device = device
         for epoch in range(self.start_epoch, self.epoch):
             metric_logger = train_one_epoch(self.model, self.optim, train_loader, device, epoch, 10)
             self.save_logs(metric_logger)
