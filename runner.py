@@ -6,8 +6,7 @@ import torch
 from reference.engine import train_one_epoch, evaluate
 from sklearn.metrics import roc_curve
 
-from .BaseRunner import BaseRunner
-from utils import BinaryMetrics, get_optimal_threshold
+# from utils import BinaryMetrics, get_optimal_threshold
 
 import numpy as np
 import csv
@@ -28,10 +27,11 @@ class Runner:
         #self.test_loader  = test_loader
         params = [p for p in model.parameters() if p.requires_grad]
         self.optim = torch.optim.Adam(params, lr=arg.lr, betas=arg.beta)
-        self.best_loss = 9999.0
+        self.best_iou = 0.0
         self.last_filename = ""
         self.save_path = arg.save_dir
-
+        self.start_epoch = 0
+        self.epoch = arg.epoch
         self.log_outs = defaultdict(list)
         self.cluster_outs = []
     
@@ -42,19 +42,19 @@ class Runner:
                     "start_epoch" : epoch + 1,
                     "network"     : self.model.state_dict(),
                     "optimizer"   : self.optim.state_dict(),
-                    "best_loss"   : self.best_loss,
+                    "best_iou"   : self.best_iou,
                     }, self.save_path + f"/{filename}.pth.tar")
         print(f"Model saved {epoch} epoch")
 
-    def save_check(self, total_loss, epoch):
+    def save_check(self, val_iou, epoch):
         if epoch == 1:
             self.filename = "VAL_epoch[%05d]_checkpoint" % (epoch)
             self.last_filename = self.filename
             self.save(epoch, self.filename)
 
-        if total_loss < self.best_loss:
-            self.best_loss = total_loss
-            self.filename = "VAL_epoch[%05d]_loss[%f]" % (epoch, total_loss)
+        if val_iou >= self.best_iou:
+            self.best_iou = val_iou
+            self.filename = "VAL_epoch[%05d]_iou[%f]" % (epoch, val_iou)
             self.save(epoch, self.filename)
         
         if epoch % 25 == 0:
@@ -86,9 +86,9 @@ class Runner:
             self.model.load_state_dict(ckpoint['network'])
             self.optim.load_state_dict(ckpoint['optimizer'])
             self.start_epoch  = ckpoint['start_epoch']
-            self.best_loss    = ckpoint["best_loss"]
-            print("Load Model Type : %s, last epoch : %d, best_loss : %f" % (
-                  ckpoint["model_type"], self.start_epoch - 1, self.best_loss))
+            self.best_iou    = ckpoint["best_iou"]
+            print("Load Model Type : %s, last epoch : %d, best_iou : %f" % (
+                  ckpoint["model_type"], self.start_epoch - 1, self.best_iou))
         else:
             print("Load Failed, file not exists")
 
@@ -156,9 +156,10 @@ class Runner:
     def valid(self, epoch):
         print(" ===== Validation after epoch = {} ===== \n".format(epoch))
         evaluator = evaluate(self.model, self.val_loader, self.device)
-        print(evaluator)
-        self.save_logs(evaluator)
-        self.save_check(evaluator, epoch)
+        for _, coco_eval in evaluator.coco_eval.items():
+            AP = coco_eval.stats
+        self.save_logs(evaluator.coco_eval)
+        self.save_check(AP[0], epoch)
     
     def test(self):        
         print(" ===== Testing ===== \n")
@@ -170,7 +171,13 @@ class Runner:
         print(" ===== Finish Testing ===== \n")
     
     def save_logs(self, logger):
-        log_csv = open(f"./outs/{self.arg.log_dir}_log.csv", 'w')
-        writer = csv.writer(log_csv)
-        writer.writerows(str(logger))
-        log_csv.close()
+        file_name = f"./outs/{self.arg.log_dir}/log.txt"
+
+        if os.path.exists(file_name):
+            append_write = 'a'
+        else:
+            append_write = 'w'
+
+        log_file = open(file_name, append_write)
+        log_file.write(f"{str(logger)} \n")
+        log_file.close()

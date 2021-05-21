@@ -81,13 +81,15 @@ class DetectionDataset:
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.as_tensor(labels, dtype=torch.int64)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        iscrowd = torch.zeros((len(objs),), dtype=torch.int64)
 
         label = {}
         label['boxes'] = boxes
         label['labels'] = labels
         label['image_id'] = image_id
         label['area'] = area
-        
+        label['iscrowd'] = iscrowd
+
         if self.transform:
             img = self.transform(img)
 
@@ -136,32 +138,35 @@ def get_data():
 
     transform = {
         'train': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ]),
         'val': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ]),
         'test': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
     }
 
     return root, pkl, transform
 
-#def get_loader(arg, root, csv, transform):
-#    
-#    train_dataset = MoleculeDataset(root['train'], csv['train'], transform['train'])
-#    val_dataset = MoleculeDataset(root['train'], csv['train'], transform['val'])
-#    test_dataset = MoleculeDataset(root['test'], csv['test'], transform['test'])
-#
-#    train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
-#    val_dataset = MoleculeDetectionDataset(root['train'], pkl['val'], transform['val'])
-#    test_dataset = MoleculeDetectionDataset(root['test'], pkl['test'], transform['test'])
-#
-#    train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8, collate_fn=collate_fn)
-#    val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8, collate_fn=collate_fn)
-#    test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8)
-#    return train_loader, val_loader, test_loader
+def get_loader(arg, root, pkl, transform):
+    
+    # train_dataset = MoleculeDataset(root['train'], csv['train'], transform['train'])
+    # val_dataset = MoleculeDataset(root['train'], csv['train'], transform['val'])
+    # test_dataset = MoleculeDataset(root['test'], csv['test'], transform['test'])
+
+    train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
+    val_dataset = MoleculeDetectionDataset(root['train'], pkl['val'], transform['val'])
+    test_dataset = MoleculeDetectionDataset(root['test'], pkl['test'], transform['test'])
+
+    train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8, collate_fn=collate_fn)
+    return train_loader, val_loader, test_loader
 
 
 if __name__ == '__main__':
@@ -189,9 +194,10 @@ if __name__ == '__main__':
         print('image size: ', img.size())
         img = img.permute(1, 2, 0)
         print('img:', img)
-        print('type(img):', type(img))
-        print("max: {}, min: {}, mean: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy()), np.average(img.cpu().numpy())))
-        plt.imshow(functional.to_pil_image(img))
+        print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
+        PIL_image = Image.fromarray(img.numpy())
+        plt.imshow(PIL_image)
+        #plt.imshow(functional.to_pil_image(img.squeeze(0)))
         #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
         #plt.show()
         

@@ -2,6 +2,8 @@ import torch
 import torchvision
 from torchvision.models.detection import FasterRCNN, MaskRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+
 from swin_transformer import SwinTransformer
 
 from collections import OrderedDict
