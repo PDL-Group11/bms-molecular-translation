@@ -14,7 +14,7 @@ import torch.cuda as cuda
 from pathlib import Path
 
 from apex.parallel import DistributedDataParallel as DDP
-import multiprocessing as mp
+import torch.multiprocessing as mp
 
 def arg_parse():
     desc = "BMS Molecular Translation"
@@ -38,8 +38,8 @@ def arg_parse():
 
     # Training configuration
     parser.add_argument('--epoch', type=int, default=200, help='epochs')
-    parser.add_argument('--batch_train', type=int, default=30, help='size of batch for train')
-    parser.add_argument('--batch_test',  type=int, default=30, help='size of batch for tevalidation and test')
+    parser.add_argument('--batch_train', type=int, default=10, help='size of batch for train')
+    parser.add_argument('--batch_test',  type=int, default=10, help='size of batch for tevalidation and test')
 
     parser.add_argument('--extract', action="store_true", help='feature extraction')
     parser.add_argument('--test', action="store_true", help='test only (skip training)')
@@ -105,6 +105,6 @@ if __name__ == "__main__":
         arg.world_size = arg.gpus * arg.nodes                #
         os.environ['MASTER_ADDR'] = '127.0.0.1'              #
         os.environ['MASTER_PORT'] = '8888'                      #
-        mp.spawn(runner.train, nprocs=arg.gpus, arg=())         #
+        mp.spawn(runner.train, nprocs=arg.gpus, args=())         #
         #########################################################
         #runner.train()

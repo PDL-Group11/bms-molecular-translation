@@ -126,7 +126,7 @@ class Runner:
         train_loader = DataLoader(
             train_dataset, 
             self.arg.batch_train, 
-            shuffle=True, 
+            shuffle=False, 
             num_workers=0, 
             collate_fn=collate_fn,
             sampler=train_sampler,
@@ -134,7 +134,7 @@ class Runner:
         val_loader = DataLoader(
             val_dataset, 
             self.arg.batch_test, 
-            shuffle=True, 
+            shuffle=False, 
             num_workers=0, 
             collate_fn=collate_fn,
             sampler=val_sampler,
@@ -146,9 +146,10 @@ class Runner:
             num_workers=0,
             sampler=test_sampler,
             )
-
+        
+        device = torch.device("cuda")
         for epoch in range(self.start_epoch, self.epoch):
-            metric_logger = train_one_epoch(self.model, self.optim, self.train_loader, self.device, epoch, 10)
+            metric_logger = train_one_epoch(self.model, self.optim, train_loader, device, epoch, 10)
             self.save_logs(metric_logger)
             self.valid(epoch)
         self.test()
