@@ -1,6 +1,8 @@
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import torch
+import torchvision
+from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.transforms import ToPILImage, functional
@@ -65,8 +67,7 @@ class DetectionDataset:
         """
         img = self.data[idx][0]
         _label = self.label[idx]
-        image_id = [v for k, v in _label.items() if k is 'image_id']
-
+        image_id = _label['image_id']
         boxes = []
         labels = []
         objs = _label['annotations']
@@ -81,15 +82,18 @@ class DetectionDataset:
         boxes = torch.as_tensor(boxes, dtype=torch.float32)
         labels = torch.as_tensor(labels, dtype=torch.int64)
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        iscrowd = torch.zeros((len(objs),), dtype=torch.int64)
 
         label = {}
         label['boxes'] = boxes
         label['labels'] = labels
-        label['image_id'] = torch.tensor(image_id)
+        label['image_id'] = image_id
         label['area'] = area
-        
+        label['iscrowd'] = iscrowd
+
         if self.transform:
             img = self.transform(img)
+
         return img, label
 
 
@@ -127,11 +131,6 @@ def get_data():
         'test': './dataset/test/'
     }
 
-    # csv = {
-    #     'train': './dataset/train_labels.csv',
-    #     'test': './dataset/sample_submission.csv'
-    # }
-
     pkl = {
         'train': './dataset/train_annotations_train.pkl',
         'val': './dataset/train_annotations_val.pkl',
@@ -168,7 +167,6 @@ def get_loader(arg, root, pkl, transform):
     train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8, collate_fn=collate_fn)
     test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8, collate_fn=collate_fn)
-
     return train_loader, val_loader, test_loader
 
 

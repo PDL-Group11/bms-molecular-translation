@@ -1,8 +1,10 @@
+import os
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 2'
+
 from runner import Runner
 from models import get_model
 from data_loader import get_data, get_loader
-
-import os
 import argparse
 from glob import glob
 import random
@@ -16,7 +18,7 @@ def arg_parse():
     parser = argparse.ArgumentParser(description=desc)
 
     # System configuration
-    parser.add_argument('--gpus', type=str, default="8",
+    parser.add_argument('--gpus', type=str, default="0,1,2",
                         help="Select GPUs (Default : Maximum number of available GPUs)")
     parser.add_argument('--cpus', type=int, default="32",
                         help="Select the number of CPUs")
@@ -30,13 +32,13 @@ def arg_parse():
                         help='model type')
     parser.add_argument('--backbone', type=str, default="mobilenet_v2", choices=["resnet_50", "mobilenet_v2", "swin_transformer"],
                         help='backbone or classifier of detector')
-    parser.add_argument('--num_classes', type=int, default=18,  
+    parser.add_argument('--num_classes', type=int, default=35,  
                         help='number of classes to be detected')
 
     # Training configuration
     parser.add_argument('--epoch', type=int, default=200, help='epochs')
-    parser.add_argument('--batch_train', type=int, default=10, help='size of batch for train')
-    parser.add_argument('--batch_test',  type=int, default=10, help='size of batch for tevalidation and test')
+    parser.add_argument('--batch_train', type=int, default=30, help='size of batch for train')
+    parser.add_argument('--batch_test',  type=int, default=30, help='size of batch for tevalidation and test')
 
     parser.add_argument('--extract', action="store_true", help='feature extraction')
     parser.add_argument('--test', action="store_true", help='test only (skip training)')
@@ -59,20 +61,20 @@ if __name__ == "__main__":
 
     arg = arg_parse()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = arg.gpus
+    #os.environ["CUDA_VISIBLE_DEVICES"] = arg.gpus
     device = torch.device("cuda")
 
-    arg.save_dir = "outs/saved_model"
-    arg.log_dir = "outs/log_dir"
+    arg.save_dir = f"faster_rcnn/model_{arg.backbone}"
+    arg.log_dir = f"faster_rcnn/log_{arg.backbone}"
     
-    os.makedirs(f'./{arg.log_dir}/', exist_ok=True)
-    os.makedirs(f'./{arg.save_dir}/', exist_ok=True)
+    os.makedirs(f'./outs/{arg.log_dir}/', exist_ok=True)
+    os.makedirs(f'./outs/{arg.save_dir}/', exist_ok=True)
 
     root, pkl, transform = get_data()
     train_loader, val_loader, test_loader = get_loader(arg, root, pkl, transform)
 
     #TODO: get model with backbone (Swin Transformer) and classifier 
-    model = get_model(arg, pretrained=False)
+    model = get_model(arg, pretrained=True)
     model = nn.DataParallel(model).to(device)
     
     #TODO: add loss criterion

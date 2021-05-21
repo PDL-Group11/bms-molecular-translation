@@ -17,6 +17,9 @@ def get_model(arg, pretrained=False):
     elif arg.backbone == "mobilenet_v2":
         backbone = torchvision.models.mobilenet_v2(pretrained=pretrained).features
         backbone.out_channels = 1280
+        for param in backbone.parameters():
+            param.requires_grad = False
+
     elif arg.backbone == "swin_transformer":
         backbone = SwinTransformer()
         # TODO: Need to check the number of output channels
