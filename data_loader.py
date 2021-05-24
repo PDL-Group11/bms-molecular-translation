@@ -156,17 +156,19 @@ def get_data():
 
 def get_loader(arg, root, pkl, transform):
     
-    # train_dataset = MoleculeDataset(root['train'], csv['train'], transform['train'])
-    # val_dataset = MoleculeDataset(root['train'], csv['train'], transform['val'])
-    # test_dataset = MoleculeDataset(root['test'], csv['test'], transform['test'])
-
     train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
     val_dataset = MoleculeDetectionDataset(root['train'], pkl['val'], transform['val'])
     test_dataset = MoleculeDetectionDataset(root['test'], pkl['test'], transform['test'])
 
-    train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8, collate_fn=collate_fn)
+    train_samlper = DistributedSampler(train_dataset)
+    val_sampler = DistributedSampler(val_dataset)
+    test_sampler = DistributedSampler(test_dataset)
+    
+    train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch_train, drop_last=True)
+
+    train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=8, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, arg.batch_test, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, arg.batch_test, sampler=test_sampler, num_workers=8, collate_fn=collate_fn)
     return train_loader, val_loader, test_loader
 
 
