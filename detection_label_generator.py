@@ -375,8 +375,10 @@ def preprocess_train_dataset(
         #data_val = data_frame.drop(data_train.index)
 
         # concatenate both datasets
-        data_train = pd.concat([data_train, train_balanced])
+        data_train = pd.concat([data_train, train_balanced]).drop_duplicates()
+        data_train.sort_values(by=['image_id'], inplace=True)
         data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
+        data_val.sort_values(by=['image_id'], inplace=True)
         print('len(data_train):', len(data_train))
         print('len(data_val):', len(data_val))
 
@@ -455,8 +457,10 @@ def preprocess_extra_dataset(
         data_val = data_frame.loc[sampled_val].reset_index()
 
         # concatenate both datasets
-        data_train = pd.concat([data_train, train_balanced])
+        data_train = pd.concat([data_train, train_balanced]).drop_duplicates()
+        data_train.sort_values(by=['image_id'], inplace=True)
         data_val = pd.concat([data_val, val_balanced]).drop_duplicates()
+        data_val.sort_values(by=['image_id'], inplace=True)
 
         # create COCO annotations
         for data_split, mode in zip([data_train, data_val], ['train', 'val']):
@@ -519,7 +523,7 @@ def create_train_COCO_json(inchi, image_id, mode, labels, base_path='.'):
     img = skimage.measure.block_reduce(img, (2,2), np.min)
     
     # add white points
-    salt_amount = np.random.uniform(0, 10/mol.GetNumAtoms())
+    salt_amount = np.random.uniform(0, 10 / mol.GetNumAtoms())
     salt = np.random.uniform(0, 1, img.shape) < salt_amount
     img = np.logical_or(img, salt)
 
