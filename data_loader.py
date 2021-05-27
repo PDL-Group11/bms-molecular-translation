@@ -1,6 +1,8 @@
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import torch
+import torchvision
+from torch.utils.data.distributed import DistributedSampler
 import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.transforms import ToPILImage, functional
@@ -9,6 +11,7 @@ from PIL import Image
 import pandas as pd
 import os
 import pickle
+from reference.utils import collate_fn
 
 class Dataset:
 
@@ -62,7 +65,31 @@ class DetectionDataset:
             our training or validation loop.
         """
         img = self.data[idx][0]
-        label = self.label[idx]['annotations']
+        _label = self.label[idx]
+        image_id = _label['image_id']
+        boxes = []
+        labels = []
+        objs = _label['annotations']
+
+        for i in range(len(objs)):
+            obj = objs[i]
+            box = obj['bbox']
+            bbox = [box[0], box[1], box[0] + box[2], box[1] + box[3]]
+            boxes.append(bbox)
+            labels.append(obj['category_id'])
+        
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.as_tensor(labels, dtype=torch.int64)
+        area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        iscrowd = torch.zeros((len(objs),), dtype=torch.int64)
+
+        label = {}
+        label['boxes'] = boxes
+        label['labels'] = labels
+        label['image_id'] = image_id
+        label['area'] = area
+        label['iscrowd'] = iscrowd
+
         if self.transform:
             img = self.transform(img)
         return img, label
@@ -102,35 +129,44 @@ def get_data():
         'test': './dataset/test/'
     }
 
-    csv = {
-        'train': './dataset/train_labels.csv',
-        'test': './dataset/sample_submission.csv'
+    pkl = {
+        'train': './dataset/train_annotations_train.pkl',
+        'val': './dataset/train_annotations_val.pkl',
+        'test': './dataset/train_annotations_val.pkl'
     }
 
     transform = {
         'train': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ]),
         'val': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ]),
         'test': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
     }
 
-    return root, csv, transform
+    return root, pkl, transform
 
-def get_loader(arg, root, csv, transform):
+def get_loader(arg, root, pkl, transform):
     
-    train_dataset = MoleculeDataset(root['train'], csv['train'], transform['train'])
-    val_dataset = MoleculeDataset(root['train'], csv['train'], transform['val'])
-    test_dataset = MoleculeDataset(root['test'], csv['test'], transform['test'])
+    train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
+    val_dataset = MoleculeDetectionDataset(root['train'], pkl['val'], transform['val'])
+    test_dataset = MoleculeDetectionDataset(root['test'], pkl['test'], transform['test'])
 
-    train_loader = DataLoader(train_dataset, arg.batch_train, shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_dataset, arg.batch_test, shuffle=True, num_workers=8)
-    test_loader = DataLoader(test_dataset, arg.batch_test, shuffle=False, num_workers=8)
+    train_samlper = DistributedSampler(train_dataset)
+    val_sampler = DistributedSampler(val_dataset)
+    test_sampler = DistributedSampler(test_dataset)
+    
+    train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch_train, drop_last=True)
 
+    train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=8, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, arg.batch_test, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, arg.batch_test, sampler=test_sampler, num_workers=8, collate_fn=collate_fn)
     return train_loader, val_loader, test_loader
 
 
@@ -159,9 +195,10 @@ if __name__ == '__main__':
         print('image size: ', img.size())
         img = img.permute(1, 2, 0)
         print('img:', img)
-        print('type(img):', type(img))
-        print("max: {}, min: {}, mean: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy()), np.average(img.cpu().numpy())))
-        plt.imshow(functional.to_pil_image(img))
+        print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
+        PIL_image = Image.fromarray(img.numpy())
+        plt.imshow(PIL_image)
+        #plt.imshow(functional.to_pil_image(img.squeeze(0)))
         #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
         #plt.show()
         
