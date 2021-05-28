@@ -153,9 +153,11 @@ def get_data():
             transforms.RandomVerticalFlip()
         ]),
         'val': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ]),
         'test': transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
     }

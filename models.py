@@ -2,6 +2,8 @@ import torch
 import torchvision
 from torchvision.models.detection import FasterRCNN, MaskRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+
 from swin_transformer import SwinTransformer
 
 from collections import OrderedDict
@@ -15,6 +17,9 @@ def get_model(arg, pretrained=False):
     elif arg.backbone == "mobilenet_v2":
         backbone = torchvision.models.mobilenet_v2(pretrained=pretrained).features
         backbone.out_channels = 1280
+        for param in backbone.parameters():
+            param.requires_grad = False
+
     elif arg.backbone == "swin_transformer":
         backbone = SwinTransformer()
         # TODO: Need to check the number of output channels
