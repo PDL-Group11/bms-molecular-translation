@@ -1,5 +1,6 @@
 import torchvision.datasets as datasets
-import torchvision.transforms as transforms
+#import torchvision.transforms as transforms
+import reference.transforms as transforms
 import torch
 import torchvision
 from torch.utils.data.distributed import DistributedSampler
@@ -11,6 +12,8 @@ from PIL import Image
 import pandas as pd
 import os
 import pickle
+import cv2
+import einops
 
 from reference.utils import collate_fn
 
@@ -42,7 +45,7 @@ class Dataset:
             img = self.transform(img)
         return img, label
 
-class DetectionDataset:
+class DetectionDataset(object):
 
     def __init__(self, root, pkl, transform=None):
         """Init function should not do any heavy lifting, but
@@ -52,7 +55,7 @@ class DetectionDataset:
         self.data = datasets.ImageFolder(root, transform)
         with open(pkl, 'rb') as f:
             label = pickle.load(f)
-        self.label = label 
+        self.label = label
         self.transform = transform
 
     def __len__(self):
@@ -91,8 +94,8 @@ class DetectionDataset:
         label['area'] = area
         label['iscrowd'] = iscrowd
 
-        if self.transform:
-            img = self.transform(img)
+        if self.transform is not None:
+            img, label = self.transform(img, label)
 
         return img, label
 
@@ -127,20 +130,27 @@ class MoleculeDetectionDataset(DetectionDataset):
 def get_data():
     
     root = {
-        'train': './dataset/train/',
+        # 'train': './dataset/train_detection_224/',
+        'train': './dataset/all_detection/train/',
+        # 'val': './dataset/train_detection_224/',
+        'val': './dataset/all_detection/val/',
         'test': './dataset/test/'
     }
 
     pkl = {
-        'train': './dataset/train_annotations_train.pkl',
-        'val': './dataset/train_annotations_val.pkl',
+        # 'train': './dataset/train_annotations_train.pkl',
+        'train': './dataset/all_annotations_train.pkl',
+        # 'val': './dataset/train_annotations_val.pkl',
+        'val': './dataset/all_annotations_val.pkl',
+
         'test': './dataset/train_annotations_val.pkl'
     }
 
     transform = {
         'train': transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip()
         ]),
         'val': transforms.Compose([
             transforms.Resize((224, 224)),
@@ -157,26 +167,34 @@ def get_data():
 def get_loader(arg, root, pkl, transform):
     
     train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
-    val_dataset = MoleculeDetectionDataset(root['train'], pkl['val'], transform['val'])
+    val_dataset = MoleculeDetectionDataset(root['val'], pkl['val'], transform['val'])
     test_dataset = MoleculeDetectionDataset(root['test'], pkl['test'], transform['test'])
 
     train_samlper = DistributedSampler(train_dataset)
     val_sampler = DistributedSampler(val_dataset)
     test_sampler = DistributedSampler(test_dataset)
     
-    train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch_train, drop_last=True)
+    train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch, drop_last=True)
 
     train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=8, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, arg.batch_test, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, arg.batch_test, sampler=test_sampler, num_workers=8, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=arg.batch, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=1, sampler=test_sampler, num_workers=8, collate_fn=collate_fn)
     return train_loader, val_loader, test_loader
 
 
 if __name__ == '__main__':
 
     train_dataset = MoleculeDetectionDataset(
-        root='./dataset/train_detection/',
-        pkl='./dataset/train_annotations_train.pkl',
+        root='./dataset/all_detection/train',
+        pkl='./dataset/all_annotations_train.pkl',
+        transform=transforms.Compose([
+            transforms.ToTensor()
+        ])
+    )
+
+    val_dataset = MoleculeDetectionDataset(
+        root='./dataset/all_detection/val',
+        pkl='./dataset/all_annotations_val.pkl',
         transform=transforms.Compose([
             transforms.ToTensor()
         ])
@@ -186,20 +204,23 @@ if __name__ == '__main__':
         dataset=train_dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=0
+        num_workers=0,
+        collate_fn = collate_fn
     )
-    for i, data in enumerate(train_dataloader):
-        print('input image size:', data[0].size())
-        print('class label:', data[1])
-        print('data[0]:', data[0])
-        img = data[0].squeeze(0)#[:]
-        print('image size: ', img.size())
-        img = img.permute(1, 2, 0)
-        print('img:', img)
-        print("max: {}, min: {}".format(np.max(img.cpu().numpy()), np.min(img.cpu().numpy())))
-        PIL_image = Image.fromarray(img.numpy())
-        plt.imshow(PIL_image)
-        #plt.imshow(functional.to_pil_image(img.squeeze(0)))
-        #plt.imshow(transforms.ToPILImage(np.array(img.squeeze(0))))
-        #plt.show()
-        
+
+    for i, item in enumerate(train_dataloader):
+        if i == 0:
+            _img, label = item
+            img = _img[0]
+            img = img.type(torch.uint8)
+            label = label[0]
+
+            bbox_img = torchvision.utils.draw_bounding_boxes(img, label['boxes'])
+            bbox = einops.rearrange(bbox_img, 'c h w -> h w c')
+            img = einops.rearrange(img, 'c h w -> h w c')
+
+            bbox = bbox.cpu().numpy()
+            img = img.cpu().numpy()
+
+            cv2.imwrite("./img/img.png", bbox * 255)
+            cv2.imwrite("./img/original.png", img * 255)
