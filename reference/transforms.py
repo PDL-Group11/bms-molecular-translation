@@ -6,7 +6,6 @@ from torchvision.transforms import functional as F
 from torchvision.transforms import transforms as T
 from typing import List, Tuple, Dict, Optional
 
-
 def _flip_coco_person_keypoints(kps, width):
     flip_inds = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
     flipped_data = kps[:, flip_inds]
@@ -40,6 +39,22 @@ class RandomHorizontalFlip(T.RandomHorizontalFlip):
                 if "keypoints" in target:
                     keypoints = target["keypoints"]
                     keypoints = _flip_coco_person_keypoints(keypoints, width)
+                    target["keypoints"] = keypoints
+        return image, target
+
+class RandomVerticalFlip(T.RandomVerticalFlip):
+    def forward(self, image: Tensor,
+                target: Optional[Dict[str, Tensor]] = None) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
+        if torch.rand(1) < self.p:
+            image = F.vflip(image)
+            if target is not None:
+                _, height = F._get_image_size(image)
+                target["boxes"][:, [1, 3]] = height - target["boxes"][:, [3, 1]]
+                if "masks" in target:
+                    target["masks"] = target["masks"].flip(0)
+                if "keypoints" in target:
+                    keypoints = target["keypoints"]
+                    keypoints = _flip_coco_person_keypoints(keypoints, height)
                     target["keypoints"] = keypoints
         return image, target
 
