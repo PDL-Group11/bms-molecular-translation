@@ -45,18 +45,6 @@ class Dataset:
             img = self.transform(img)
         return img, label
 
-# class TestDataset(object):
-
-#     def __init__(self, root, csv):
-#         self.root = root
-#         self.csv = csv
-#         self.data = datasets.ImageFolder(root)
-
-#     def __len__(self):
-#         return len(self.data)
-    
-#     def __getitem__(self, idx):
-
 class DetectionDataset(object):
 
     def __init__(self, root, pkl, transform=None):
