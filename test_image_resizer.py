@@ -1,10 +1,9 @@
 from pathlib import Path
 import os
 from PIL import Image
-# import ray
+import ray
 import numpy as np
 import skimage.measure
-from tqdm import tqdm
 
 PROJECT_DIR = Path('.')
 INPUT_DIR = PROJECT_DIR / 'dataset'
@@ -12,8 +11,10 @@ TEST_DATA_PATH = INPUT_DIR / 'test'
 SAVE_DATA_PATH = INPUT_DIR / 'new_test'
 SIZE = 600
 
-# @ray.remote
-def generate_normal_molecule_image(dir_path):
+@ray.remote
+def generate_normal_molecule_image(i,j,k):
+    dir_path = f'{i}/{j}/{k}'
+    (SAVE_DATA_PATH / dir_path).mkdir(parents=True,exist_ok=True)
     image_names = os.listdir(TEST_DATA_PATH / dir_path)
     for image in image_names:
         with Image.open(TEST_DATA_PATH/ dir_path / image) as img:
@@ -38,14 +39,11 @@ def generate_normal_molecule_image(dir_path):
     return
 
 if __name__ == '__main__':
-    # ray.init()
+    ray.init()
 
     num_directory = ['0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f']
-    for i in num_directory:
+    for i in num_directory[9:]:
         for j in num_directory:
-            for k in num_directory:
-                dir_path = f"{i}/{j}/{k}"
-                (SAVE_DATA_PATH / dir_path).mkdir(parents=True,exist_ok=True)
-                generate_normal_molecule_image(dir_path)
-    # results = ray.get([generate_normal_molecule_image.remote(10, i, labels, EXTRA_IMG_SAVE_PATH) for i in range(36)])
+            results = ray.get([generate_normal_molecule_image.remote(i,j,k) for k in num_directory])
+    
     print('DONE!')
