@@ -3,14 +3,14 @@ import os
 from PIL import Image
 # import ray
 import numpy as np
-
+import skimage.measure
 from tqdm import tqdm
 
 PROJECT_DIR = Path('.')
 INPUT_DIR = PROJECT_DIR / 'dataset'
 TEST_DATA_PATH = INPUT_DIR / 'test'
 SAVE_DATA_PATH = INPUT_DIR / 'new_test'
-SIZE = 300
+SIZE = 600
 
 # @ray.remote
 def generate_normal_molecule_image(dir_path):
@@ -19,15 +19,21 @@ def generate_normal_molecule_image(dir_path):
         with Image.open(TEST_DATA_PATH/ dir_path / image) as img:
             width = img.width
             height = img.height
-            htarget = int(300 * float(height) / width)
-            wtarget = int(300 * float(width) / height)
-            result = Image.new(img.mode, (300,300), 255)
+            htarget = int(SIZE * float(height) / width)
+            wtarget = int(SIZE * float(width) / height)
+            result = Image.new(img.mode, (SIZE,SIZE), 255)
             if width > height: 
-                img = img.resize((300, htarget), Image.BICUBIC)
-                result.paste(img, (0, (300-htarget) // 2))
+                img = img.resize((SIZE, htarget), Image.LANCZOS)
+                result.paste(img, (0, (SIZE-htarget) // 2))
             else:
-                img = img.resize((wtarget, 300), Image.BICUBIC)
-                result.paste(img, ((300-wtarget) // 2, 0))
+                img = img.resize((wtarget, SIZE), Image.LANCZOS)
+                result.paste(img, ((SIZE-wtarget) // 2, 0))
+
+            fn = lambda x : 0 if x < 100 else 255
+            result = result.convert('L').point(fn, mode='1')
+            result = np.asarray(result)
+            result = skimage.measure.block_reduce(result, (2,2), np.min)
+            result = Image.fromarray(result)
             result.save( SAVE_DATA_PATH / dir_path / image)
     return
 
