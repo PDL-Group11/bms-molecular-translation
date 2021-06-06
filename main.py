@@ -13,7 +13,13 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import reference.utils as utils
 from reference.engine import train_one_epoch, evaluate
-
+from inference import infer
+from torch.utils.data import Subset, DataLoader
+import ray
+import multiprocessing
+from data_loader import TestDataset
+import torchvision
+import pandas as pd
 # import torchvision
 # import torchvision.utils
 # import cv2
@@ -93,8 +99,11 @@ if __name__ == "__main__":
     model = get_model(arg, pretrained=True)
     model = model.to(device)
     # model = nn.DataParallel(model).to(device)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[arg.gpu])
-    model_without_ddp = model.module
+    if utils.is_use_distributed_mode(arg):
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[arg.gpu])
+        model_without_ddp = model.module
+    else:
+        model_without_ddp = model
     params = [p for p in model.parameters() if p.requires_grad]
     # optimizer = optim.Adam(params, lr=arg.lr, betas=arg.beta)
     optimizer = torch.optim.SGD(
@@ -117,33 +126,89 @@ if __name__ == "__main__":
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         arg.start_epoch = checkpoint['epoch'] + 1
 
-    # if arg.load_path:
-    #     print(" === load model from {arg.load_path} ===")
-        # runner.load(abs_filename=arg.load_path)
     if arg.test:
-        for i, item in enumerate(test_loader):
-            img, label = item
-            model = model.load_state_dict(torch.load(arg.load_path)['model'])
-            model_without_ddp = model.module
+        ray.init(
+            ignore_reinit_error=True, 
+            num_cpus=int(multiprocessing.cpu_count()),
+            num_gpus=(torch.cuda.device_count() if torch.cuda.is_available() else 0),
+            #num_gpus=(3 if torch.cuda.is_available() else 0),
+        )
+        transform = {
+            'train': transforms.Compose([
+                transforms.ToTensor(),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip()
+            ]),
+            'val': transforms.Compose([
+                transforms.ToTensor()
+            ]),
+            'test': torchvision.transforms.Compose([
+                torchvision.transforms.Resize((300, 300)),
+                torchvision.transforms.ToTensor()
+            ])
+        }
+        root = {
+            # 'train': './dataset/good2/train/',
+            'train': './dataset/all_detection/train/',
+            # 'val': './dataset/good2/val/',
+            'val': './dataset/all_detection/val/',
+            # 'test': './dataset/test/'
+            'test': '~/hgkim/bms-molecular-translation/dataset/new_test/'
 
-            out = model(img)
-            print(out.size())
+        }
 
-        # evaluate(model, test_loader, device=device)
+        pkl = {
+            # 'train': './dataset/good2/train_annotations_train.pkl',
+            'train': './dataset/all_annotations_train.pkl',
+            # 'val': './dataset/good2/train_annotations_val.pkl',
+            'val': './dataset/all_annotations_val.pkl',
+            'test': './dataset/sample_submission.csv'
+        }
+        test_dataset = TestDataset(root['test'], pkl['test'], transform['test'])
+        print('len(test_dataset):', len(test_dataset))
+        indices = []
+        n_workers = torch.cuda.device_count() * 4
+        offset = int(len(test_dataset) / n_workers)
+        for i in range(n_workers):
+            indices.append(torch.arange(i * offset, (i + 1) * offset))
+            if i == n_workers - 1 and (i + 1) * offset < len(test_dataset) - 1:
+                indices.append(torch.arange((i + 1) * offset, len(test_dataset)))
+        test_datasets = [Subset(test_dataset, index) for index in indices]
+        test_loaders = [
+            DataLoader(test_datasets[i], batch_size=1, shuffle=False, num_workers=8)
+            for i in range(len(test_datasets))
+            ]
+        
+        checkpoint = torch.load(arg.load_path, map_location='cpu')
+        model_without_ddp.load_state_dict(checkpoint['model'])
+        model_without_ddp.eval()
+        RemoteWorker = ray.remote(num_gpus=(0.25 if torch.cuda.is_available() else 0))(infer)
+        dfs = ray.get([RemoteWorker.remote(model_without_ddp, test_loaders[i], device) for i in range(len(test_loaders))])
+        #print('dfs:', dfs)
+        main_df = pd.DataFrame(columns=['image_id', 'InChI'])
+        for d in dfs:
+            main_df = main_df.append(d, ignore_index=True)
+        main_df.sort_values(by=['image_id'])
+        # main_df.to_csv('./sample_submission_naive_resize.csv', index=False)
+        main_df.to_csv('./sample_submission_new_resize.csv', index=False)
 
-    print("Start training")
-    early_stopping = utils.EarlyStopping(patience=7, verbose=True)
+    if not arg.test:
+        print("Start training")
+        early_stopping = utils.EarlyStopping(patience=7, verbose=True)
 
-    start_time = time.time()
-    for epoch in range(arg.start_epoch, arg.epoch):
-        # train_sampler.set_epoch(epoch)
-        train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=20)
-        lr_scheduler.step()
+        start_time = time.time()
+        for epoch in range(arg.start_epoch, arg.epoch):
+            # train_sampler.set_epoch(epoch)
+            train_one_epoch(model, optimizer, train_loader, device, epoch, print_freq=20)
+            lr_scheduler.step()
 
-        # evaluate after every epoch
-        loss = evaluate(model, val_loader, device=device)
-        early_stopping(arg, epoch, loss, model_without_ddp, optimizer, lr_scheduler)
+            # evaluate after every epoch
+            loss = evaluate(model, val_loader, device=device)
+            early_stop = early_stopping(arg, epoch, loss, model_without_ddp, optimizer, lr_scheduler)
 
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+            if early_stop:
+                break
+
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        print('Training time {}'.format(total_time_str))
