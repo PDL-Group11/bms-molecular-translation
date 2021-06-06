@@ -19,15 +19,23 @@ Use RDKit and Torchvision to train and infer the correponding InChI string.
 
 `conda env create -f bms_env.yaml`
 
-`conda activate bms_env`
+`conda activate bms`
 
 RDKit should be installed individually from [here](https://www.rdkit.org/docs/Install.html).
+
+* Generating image dataset and labels for training
+
+`python3 detection_label_generator.py`
 
 * Train
 
 `python3 -m torch.distributed.launch --nproc_per_node=NUMBER_OF_PROCESSES --use_env main.py`
 
 Make sure to use proper data path in `data_loader.py`.
+
+* Resize test images into 300 x 300
+
+`python3 test_image_resizer.py`
 
 * Inference
 
