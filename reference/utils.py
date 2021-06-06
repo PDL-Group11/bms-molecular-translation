@@ -301,6 +301,14 @@ def save_on_master(*args, **kwargs):
     if is_main_process():
         torch.save(*args, **kwargs)
 
+def is_use_distributed_mode(args):
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        return True
+    elif 'SLURM_PROCID' in os.environ:
+        return True
+    else:
+        args.distributed = False
+        return False
 
 def init_distributed_mode(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -369,6 +377,8 @@ class EarlyStopping:
             self.best_score = score
             self.save_checkpoint(arg, epoch, val_loss, model, optimizer, lr_scheduler)
             self.counter = 0
+        
+        return self.early_stop
 
     def save_checkpoint(self, arg, epoch, val_loss, model, optimizer, lr_scheduler):
         '''Saves model when validation loss decrease.'''
@@ -387,5 +397,5 @@ class EarlyStopping:
         save_on_master(
             checkpoint,
             os.path.join(arg.save_dir, 'checkpoint.pth'))
-        self.val_loss_min = val_loss
 
+        self.val_loss_min = val_loss

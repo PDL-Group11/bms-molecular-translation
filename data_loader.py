@@ -1,4 +1,5 @@
 import torchvision.datasets as datasets
+from torchvision.transforms.transforms import Resize
 #import torchvision.transforms as transforms
 import reference.transforms as transforms
 import torch
@@ -14,18 +15,20 @@ import os
 import pickle
 import cv2
 import einops
+from reference.utils import is_use_distributed_mode
 
 from reference.utils import collate_fn
 
-class Dataset:
+class TestDataset(object):
 
     def __init__(self, root, csv, transform=None):
         """Init function should not do any heavy lifting, but
             must initialize how many items are available in this data set.
         """
 
-        self.data = datasets.ImageFolder(root, transform)
+        self.data = datasets.ImageFolder(root)
         self.label_frame = pd.read_csv(csv)
+        self.filename = self.label_frame['image_id']
         self.transform = transform
 
     def __len__(self):
@@ -33,17 +36,25 @@ class Dataset:
 
         return len(self.label_frame)
 
+    def get_image_from_folder(self, filename):
+        file_path = [filename[0], filename[1], filename[2], f"{filename}.png"]
+        f = os.path.join(self.data.root, *file_path)
+        img = self.data.loader(f)
+        return img
+
     def __getitem__(self, idx):
         """ Here we have to return the item requested by `idx`
             The PyTorch DataLoader class will use this method to make an iterable for
             our training or validation loop.
         """
+        if torch.is_tensor(idx):
+            idx = idx.item()
 
-        img = self.data[idx][0]
-        label = self.label_frame.iloc[idx, 1]
+        img = self.get_image_from_folder(self.filename[idx])
+
         if self.transform:
             img = self.transform(img)
-        return img, label
+        return img, self.filename[idx]
 
 class DetectionDataset(object):
 
@@ -99,20 +110,6 @@ class DetectionDataset(object):
 
         return img, label
 
-
-class MoleculeDataset(Dataset):
-
-    def __init__(self, root, csv, transform=None):
-        '''
-        args:
-            csv (string): label csv path
-            root (string): image files path
-            transform (callable, optional): optional transform on samples
-        '''
-        super(MoleculeDataset, self).__init__(root, csv)
-        self.root = root
-        self.transform = transform
-
 class MoleculeDetectionDataset(DetectionDataset):
 
     def __init__(self, root, pkl, transform=None):
@@ -133,7 +130,8 @@ def get_data():
         'train': './dataset/all_detection/train/',
         # 'val': './dataset/good2/val/',
         'val': './dataset/all_detection/val/',
-        'test': './dataset/test/'
+        # 'test': './dataset/test/'
+        'test': '~/hgkim/bms-molecular-translation/dataset/new_test/'
     }
 
     pkl = {
@@ -141,6 +139,7 @@ def get_data():
         'train': './dataset/all_annotations_train.pkl',
         # 'val': './dataset/good2/train_annotations_val.pkl',
         'val': './dataset/all_annotations_val.pkl',
+        'test': './dataset/sample_submission.csv'
     }
     return root, pkl
 
@@ -156,66 +155,81 @@ def get_loader(arg, root, pkl):
         'val': transforms.Compose([
             transforms.ToTensor()
         ]),
-        'test': transforms.Compose([
-            transforms.ToTensor()
+        'test': torchvision.transforms.Compose([
+            torchvision.transforms.Resize((300, 300)),
+            torchvision.transforms.ToTensor()
         ])
     }
 
     train_dataset = MoleculeDetectionDataset(root['train'], pkl['train'], transform['train'])
     val_dataset = MoleculeDetectionDataset(root['val'], pkl['val'], transform['val'])
-    test_dataset = MoleculeDetectionDataset(root['test'], pkl['train'], transform['test'])
+    # test_dataset = MoleculeDetectionDataset(root['test'], pkl['train'], transform['test'])
+    test_dataset = TestDataset(root['test'], pkl['test'], transform['test'])
 
-    train_samlper = DistributedSampler(train_dataset)
-    val_sampler = DistributedSampler(val_dataset)
-    test_sampler = DistributedSampler(test_dataset)
+    if is_use_distributed_mode(arg):
+        train_samlper = DistributedSampler(train_dataset)
+        val_sampler = DistributedSampler(val_dataset)
+        test_sampler = DistributedSampler(test_dataset)
     
-    train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch, drop_last=True)
+        train_batch_sampler = torch.utils.data.BatchSampler(train_samlper, arg.batch, drop_last=True)
+        test_batch_sampler = torch.utils.data.BatchSampler(test_sampler, 1, drop_last=False)
 
-    train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=8, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=arg.batch, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=1, sampler=test_sampler, num_workers=8, collate_fn=collate_fn)
+        train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler, num_workers=8, collate_fn=collate_fn)
+        val_loader = DataLoader(val_dataset, batch_size=arg.batch, sampler=val_sampler, num_workers=8, collate_fn=collate_fn)
+        test_loader = DataLoader(test_dataset, batch_size=1, batch_sampler=test_batch_sampler, shuffle=False, num_workers=8)
+    else:
+        train_loader = DataLoader(train_dataset, num_workers=8, collate_fn=collate_fn)
+        val_loader = DataLoader(val_dataset, batch_size=arg.batch, num_workers=8, collate_fn=collate_fn)
+        test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=8)
+
     return train_loader, val_loader, test_loader
 
 
 if __name__ == '__main__':
 
-    train_dataset = MoleculeDetectionDataset(
-        root='./dataset/all_detection/train',
-        pkl='./dataset/all_annotations_train.pkl',
-        transform=transforms.Compose([
+    # train_dataset = MoleculeDetectionDataset(
+    #     root='./dataset/all_detection/train',
+    #     pkl='./dataset/all_annotations_train.pkl',
+    #     transform=transforms.Compose([
+    #         transforms.ToTensor()
+    #     ])
+    # )
+
+    # val_dataset = MoleculeDetectionDataset(
+    #     root='./dataset/all_detection/val',
+    #     pkl='./dataset/all_annotations_val.pkl',
+    #     transform=transforms.Compose([
+    #         transforms.ToTensor()
+    #     ])
+    # )
+
+    # train_dataloader = DataLoader(
+    #     dataset=train_dataset,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     num_workers=0,
+    #     collate_fn = collate_fn
+    # )
+    
+    transform = {
+        'train': transforms.Compose([
+            transforms.ToTensor(),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip()
+        ]),
+        'val': transforms.Compose([
+            transforms.ToTensor()
+        ]),
+        'test': transforms.Compose([
             transforms.ToTensor()
         ])
-    )
+    }
+    test_dataset = TestDataset('./dataset/test/', './dataset/sample_submission.csv', torchvision.transforms.ToTensor())
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=1)
 
-    val_dataset = MoleculeDetectionDataset(
-        root='./dataset/all_detection/val',
-        pkl='./dataset/all_annotations_val.pkl',
-        transform=transforms.Compose([
-            transforms.ToTensor()
-        ])
-    )
-
-    train_dataloader = DataLoader(
-        dataset=train_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=0,
-        collate_fn = collate_fn
-    )
-
-    for i, item in enumerate(train_dataloader):
+    for i, item in enumerate(test_loader):
         if i == 0:
-            _img, label = item
-            img = _img[0]
-            img = img.type(torch.uint8)
-            label = label[0]
-
-            bbox_img = torchvision.utils.draw_bounding_boxes(img, label['boxes'])
-            bbox = einops.rearrange(bbox_img, 'c h w -> h w c')
-            img = einops.rearrange(img, 'c h w -> h w c')
-
-            bbox = bbox.cpu().numpy()
-            img = img.cpu().numpy()
-
-            cv2.imwrite("./img/img.png", bbox * 255)
-            cv2.imwrite("./img/original.png", img * 255)
+            img, filename = item
+            print(img.size(), filename)
+        else:
+            break
